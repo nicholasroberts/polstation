@@ -1,0 +1,27 @@
+# Replace @INSTALL_ROOT@ with the absolute installed checkout path.
+[Unit]
+Description=Polstation dashboard (scaffold)
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=polstation
+Group=polstation
+WorkingDirectory=@INSTALL_ROOT@
+ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-dashboard --config /etc/polstation/config.yaml
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+Environment=PYTHONUNBUFFERED=1
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/polstation
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

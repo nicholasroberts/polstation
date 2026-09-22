@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polstation"
+version = "0.1.0.dev0"
+description = "Headless sky-polarization field instrument scaffold"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0,<7"]
+
+[project.scripts]
+polstation-acquisition = "polstation.acquisition.service:main"
+polstation-dashboard = "polstation.web.app:main"
+polstation-check-config = "polstation.config:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

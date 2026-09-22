@@ -1,0 +1,9 @@
+"""Future adapter contract. No camera SDK is imported or initialized."""
+from typing import Protocol
+from polstation.models import FrameMetadata
+
+
+class Camera(Protocol):
+    def open(self) -> None: ...
+    def capture(self, observation_id: str) -> tuple[bytes, FrameMetadata]: ...
+    def close(self) -> None: ...

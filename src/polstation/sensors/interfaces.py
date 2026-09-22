@@ -1,0 +1,9 @@
+"""Future BME280 and EPEVER adapters must timestamp their own samples."""
+from typing import Protocol
+from polstation.models import SensorSample
+
+
+class Sensor(Protocol):
+    def open(self) -> None: ...
+    def sample(self) -> SensorSample: ...
+    def close(self) -> None: ...

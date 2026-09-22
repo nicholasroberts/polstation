@@ -1,0 +1,44 @@
+# Complete configuration; paths resolve relative to this YAML file.
+mode: scaffold
+provenance:
+  git_commit: null  # Set to the full commit SHA when deploying.
+  release_tag: null
+  calibration_id: null
+acquisition:
+  heartbeat_seconds: 10
+  retry_initial_seconds: 1
+  retry_max_seconds: 60
+cameras:
+  - id: camera_1
+    model: Allied Vision Mako G-223B
+    serial: null
+    polarizer_angle_deg: null
+  - id: camera_2
+    model: Allied Vision Mako G-223B
+    serial: null
+    polarizer_angle_deg: null
+  - id: camera_3
+    model: Allied Vision Mako G-223B
+    serial: null
+    polarizer_angle_deg: null
+sensors:
+  bme280:
+    interface: i2c
+    bus: null
+    address: null
+  epever:
+    model: EPEVER Tracer 2210AN
+    interface: usb-rs485-modbus-rtu
+    device: null  # Prefer a stable /dev/serial/by-id/... path.
+    slave_address: null
+    baudrate: null
+    parity: null
+    stopbits: null
+storage:
+  data_root: /var/lib/polstation/data
+  state_root: /var/lib/polstation/state
+  minimum_free_bytes: 1073741824
+dashboard:
+  host: 127.0.0.1
+  port: 8000
+  stale_after_seconds: 90

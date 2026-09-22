@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Instrument data, runtime state, local deployment configuration and large arrays
+/data/
+/state/
+/backups/
+/config/local*.yaml
+/config/field.yaml
+*.npy
+*.npz
+*.raw
+*.fits
+*.fit
+*.tif
+*.tiff
+
+# macOS Finder metadata
+.DS_Store
