@@ -44,3 +44,15 @@ Any future control API belongs behind the acquisition/controller boundary;
 the dashboard must never open camera or sensor devices directly. Today the
 process boundary is an atomic read-only health file exposed by the dashboard's
 HTTP API; a controller command API is deliberately deferred.
+
+## Local preview demo
+
+`polstation-dashboard --demo` selects `DemoPreviewSource` behind the read-only
+`PreviewSource` snapshot contract. The browser polls `/api/previews` at roughly
+one Hz and shows inline SVG images, timestamps and fault states. Static assets
+are bundled with the Python package. No third-party browser assets are loaded.
+Demo source generation is request-driven, not an acquisition loop, and performs
+no scientific storage writes. The normal scaffold dashboard and acquisition
+health remain unchanged. A later real preview source should read bounded latest-
+frame snapshots from the independent acquisition worker without owning devices
+inside the web process.

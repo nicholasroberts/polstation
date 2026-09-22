@@ -1,6 +1,9 @@
 """Loopback-only, read-only status dashboard for access over an SSH tunnel."""
 import argparse
 import json
+from importlib.resources import files
+from urllib.parse import parse_qs, urlsplit
+from polstation.cameras.demo import DemoPreviewSource
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from polstation.config import load_config
 from polstation.health.status import read
@@ -17,11 +20,24 @@ refresh(); setInterval(refresh, 5000);
 </script></html>"""
 
 
-def make_handler(config):
+def make_handler(config, preview_source=None):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path == "/":
-                code, content_type, body = 200, "text/html; charset=utf-8", PAGE
+            request = urlsplit(self.path)
+            if request.path == "/":
+                body = files("polstation.web").joinpath("static/dashboard.html").read_bytes() if preview_source else PAGE
+                code, content_type = 200, "text/html; charset=utf-8"
+            elif request.path in ("/static/dashboard.css", "/static/dashboard.js") and preview_source:
+                name = request.path.rsplit("/", 1)[1]
+                content_type = "text/css" if name.endswith(".css") else "text/javascript"
+                code, body = 200, files("polstation.web").joinpath("static", name).read_bytes()
+            elif request.path == "/api/previews" and preview_source:
+                scenario = parse_qs(request.query).get("scenario", ["live"])[0]
+                if scenario not in ("live", "faults"):
+                    code, body = 400, b'{"error": "Unknown demo scenario"}'
+                else:
+                    code, body = 200, json.dumps(preview_source.snapshot(scenario)).encode()
+                content_type = "application/json"
             elif self.path == "/api/status":
                 status = read(config)
                 code = 503 if status["stale"] or status["state"] != "scaffold_idle" else 200
@@ -40,8 +56,12 @@ def make_handler(config):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
-    config = load_config(parser.parse_args().config)
-    server = ThreadingHTTPServer((config["dashboard"]["host"], config["dashboard"]["port"]), make_handler(config))
+    parser.add_argument("--demo", action="store_true", help="Show simulated cameras; no hardware or scientific data writes")
+    args = parser.parse_args()
+    config = load_config(args.config)
+    source = DemoPreviewSource(config["cameras"]) if args.demo else None
+    server = ThreadingHTTPServer((config["dashboard"]["host"], config["dashboard"]["port"]), make_handler(config, source))
+    print(f"Polstation {'DEMO' if args.demo else 'scaffold'} dashboard: http://{config['dashboard']['host']}:{server.server_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
