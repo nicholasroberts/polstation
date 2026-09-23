@@ -14,3 +14,10 @@ future dataset and retain the assets for reproducibility.
 
 Commissioning must establish dark/flat corrections, camera response, optical
 alignment, polarizer orientations and timing error before deriving polarization.
+
+## Earlier Ubuntu workflow
+
+See [the legacy calibration review](legacy-calibration-review.md) for the
+reviewed dark/response correction equations, Stokes calculations, false-colour
+conventions, and issues to resolve before integrating hardware or methods.
+This is a static review, not a validated port.
