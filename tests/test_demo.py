@@ -1,6 +1,8 @@
 """Check preview isolation, fault semantics and the actual HTTP boundary."""
 import json
 from pathlib import Path
+import struct
+import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
@@ -8,6 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from polstation.cameras.demo import DemoPreviewSource
+from polstation.cameras.preview import FilePreviewSource, mono8_preview_png
 from polstation.config import load_config
 from polstation.web.app import make_handler
 
@@ -78,3 +81,25 @@ class DemoTests(unittest.TestCase):
             urlopen(base + '/api/previews')
         self.assertEqual(caught.exception.code, 404)
         caught.exception.close()
+
+    def test_mono8_preview_is_bounded_png(self):
+        image = mono8_preview_png(bytes(range(24)), 6, 4, max_width=3, max_height=2)
+        self.assertEqual(image[:8], b'\x89PNG\r\n\x1a\n')
+        self.assertEqual(struct.unpack('>II', image[16:24]), (3, 2))
+
+    def test_file_preview_source_reads_latest_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.config['storage']['state_root'] = directory
+            source = FilePreviewSource(self.config)
+            self.assertFalse(source.snapshot()['hardware_ready'])
+            value = {'mode': 'hardware-preview', 'hardware_ready': True, 'recording': False,
+                     'synchronization': 'unverified', 'cameras': [{
+                         'id': 'camera', 'state': 'live',
+                         'captured_at_utc': '2000-01-01T00:00:00+00:00'}]}
+            (Path(directory) / 'camera-previews.json').write_text(json.dumps(value))
+            snapshot = source.snapshot()
+            self.assertFalse(snapshot['hardware_ready'])
+            self.assertGreater(snapshot['cameras'][0]['age_seconds'], 0)
+            self.assertEqual(snapshot['cameras'][0]['state'], 'stale')
+            with self.assertRaises(ValueError):
+                source.snapshot('faults')

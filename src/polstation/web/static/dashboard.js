@@ -19,6 +19,13 @@ function markUnavailable(message) {
   });
 }
 function render(data) {
+  const hardware = data.mode === 'hardware-preview';
+  document.querySelector('#scenario-control').hidden = hardware;
+  document.querySelector('#banner-title').textContent = hardware ? 'HARDWARE PREVIEW — not recording' : 'DEMO — no cameras connected';
+  document.querySelector('#banner-detail').textContent = hardware ? 'Real camera frames. Sequential, unsynchronized and not saved as observations.' : 'All images and camera values are simulated. No scientific data is recorded.';
+  document.querySelector('#source-label').textContent = hardware ? 'Vimba X · real cameras' : 'Simulation';
+  document.querySelector('#channel-count').textContent = String(data.cameras.length).padStart(2, '0');
+  document.querySelector('#footer-status').textContent = hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
   const currentIds = new Set(data.cameras.map(camera => camera.id));
   cards.forEach((card, id) => { if (!currentIds.has(id)) { card.remove(); cards.delete(id); } });
   data.cameras.forEach((camera, index) => {
@@ -31,22 +38,24 @@ function render(data) {
     card.dataset.state = camera.state;
     card.querySelector('.channel').textContent = `CHANNEL ${String(index + 1).padStart(2, '0')}`;
     card.querySelector('h3').textContent = camera.id.replaceAll('_', ' ');
-    card.querySelector('.badge').textContent = {live:'● Live · demo', stale:'Stale · demo', disconnected:'Disconnected'}[camera.state];
-    card.querySelector('.model').textContent = `${camera.model} · simulated source`;
-    card.querySelector('.exposure').textContent = `${(camera.exposure_us / 1000).toFixed(1)} ms`;
-    card.querySelector('.gain').textContent = `${camera.gain_db.toFixed(1)} dB`;
+    card.querySelector('.badge').textContent = camera.state === 'live' ? `● Live${camera.simulated ? ' · demo' : ''}` : camera.state === 'stale' ? `Stale${camera.simulated ? ' · demo' : ''}` : 'Disconnected';
+    card.querySelector('.model').textContent = `${camera.model}${camera.simulated ? ' · simulated source' : ` · ${camera.pixel_format || 'format unknown'}`}`;
+    card.querySelector('.exposure').textContent = Number.isFinite(camera.exposure_us) ? `${(camera.exposure_us / 1000).toFixed(1)} ms` : '—';
+    card.querySelector('.gain').textContent = Number.isFinite(camera.gain_db) ? `${camera.gain_db.toFixed(1)} dB` : '—';
     card.querySelector('.age').textContent = camera.age_seconds === null ? '—' : `${camera.age_seconds.toFixed(1)} s`;
     card.querySelector('.frame').textContent = camera.frame_number === null ? '—' : String(camera.frame_number).padStart(6, '0');
     card.querySelector('time').textContent = camera.captured_at_utc ? new Date(camera.captured_at_utc).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : 'No frame available';
     const img = card.querySelector('img');
-    img.hidden = !camera.preview_svg;
-    img.style.display = camera.preview_svg ? 'block' : 'none';
-    // SVG is displayed as an image, never injected into the document DOM.
+    // Preview payloads are displayed as images, never injected into the document DOM.
+    const preview = camera.preview_svg || camera.preview_png;
     if (camera.preview_svg) img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(camera.preview_svg)}`;
+    else if (camera.preview_png) img.src = `data:image/png;base64,${camera.preview_png}`;
     else img.removeAttribute('src');
+    img.hidden = !preview;
+    img.style.display = preview ? 'block' : 'none';
     const overlay = card.querySelector('.overlay');
     overlay.hidden = camera.state === 'live';
-    overlay.textContent = camera.state === 'stale' ? 'Stale frame · simulated interruption' : 'No preview · simulated disconnect';
+    overlay.textContent = camera.state === 'stale' ? 'Stale frame' : 'No current preview';
   });
 }
 async function refresh() {
@@ -60,13 +69,14 @@ async function refresh() {
     if (!response.ok) throw new Error('Preview request failed');
     const data = await response.json();
     if (ticket !== sequence) return;
-    if (data.mode !== 'demo' || !Array.isArray(data.cameras)) throw new Error('Invalid demo response');
+    if (!['demo', 'hardware-preview'].includes(data.mode) || !Array.isArray(data.cameras)) throw new Error('Invalid preview response');
+    if (data.error) throw new Error(data.error);
     render(data);
     lastSuccess = Date.now();
     error.hidden = true;
-    document.querySelector('#connection').textContent = scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
+    document.querySelector('#connection').textContent = data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · sequential and unsynchronized` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
   } catch (_) {
-    if (ticket === sequence) markUnavailable('Cannot reach the demo source. Displayed frames are no longer live. Reconnecting automatically…');
+    if (ticket === sequence) markUnavailable('Cannot reach the preview source. Displayed frames are no longer live. Reconnecting automatically…');
   } finally {
     clearTimeout(timeout);
     if (ticket === sequence) setTimeout(refresh, 1000);

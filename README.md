@@ -80,9 +80,38 @@ templates do not enable demo mode.
 The read-only `/api/previews?scenario=live` endpoint returns in-memory snapshots
 from a separate `DemoPreviewSource`; `scenario=faults` selects the fault example.
 The simulator computes frames on request, with no capture worker or growing frame
-queue. The dashboard only renders these snapshots. When hardware arrives, a real
-preview adapter can read the latest frames from an independent acquisition worker;
-that worker and its camera SDK integration are not implemented yet.
+queue. The dashboard only renders these snapshots.
+
+## Diagnostic preview with three real cameras
+
+An initial hardware-preview path has been verified on the Pi 5. It is a bounded
+diagnostic, not scientific acquisition: the producer captures the three cameras
+sequentially in Mono8, publishes replaceable latest-frame previews, and records
+no observations. Frames are not synchronized or calibrated.
+
+With the SDK-matched VmbPy environment active and all three cameras discovered:
+
+```sh
+polstation-camera-preview --config config/default.yaml --interval 1
+```
+
+Run the read-only dashboard separately:
+
+```sh
+polstation-dashboard --config config/default.yaml --hardware-preview
+```
+
+The dashboard continues to bind to Pi loopback. From the laptop, forward a local
+port and browse to `http://127.0.0.1:8080`:
+
+```sh
+ssh -N -L 8080:127.0.0.1:8000 OPERATOR@ACTUAL_PI_ADDRESS
+```
+
+The producer temporarily selects a 1500-byte camera packet, Mono8, and free-run
+triggering, and restores the preceding values on clean shutdown. Stop it with
+`Ctrl+C`. Do not use this path as evidence of synchronized exposure or raw-data
+preservation.
 
 ## Repository and deployment
 
@@ -92,6 +121,8 @@ Code lives under `src/polstation/`; `tests/` is hardware-independent.
 - [Architecture](docs/architecture.md)
 - [Data and provenance](docs/data-format.md)
 - [Calibration](docs/calibration.md)
+- [First SSH and Vimba X camera bring-up](docs/first-boot.md)
+- [2026-09-28 Pi/Vimba X commissioning record](docs/commissioning/2026-09-28-pi5-vimbax-camera-bring-up.md)
 - [Local → GitHub → Pi workflow](docs/deployment.md)
 - [Operations and recovery](docs/operations.md)
 

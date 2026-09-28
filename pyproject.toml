@@ -14,6 +14,7 @@ dependencies = ["PyYAML>=6.0,<7"]
 polstation-acquisition = "polstation.acquisition.service:main"
 polstation-dashboard = "polstation.web.app:main"
 polstation-check-config = "polstation.config:main"
+polstation-camera-preview = "polstation.cameras.preview:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
