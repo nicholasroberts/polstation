@@ -1,9 +1,10 @@
 # polstation
 
 Python scaffold for a Raspberry Pi 5 sky-polarization instrument intended for a
-year-long unattended deployment. **This is not field-ready software.** It does
-not acquire images, communicate with hardware, synchronize cameras, or calculate
-polarization. Its running acquisition process only publishes scaffold health.
+year-long unattended deployment. **This is not field-ready software.** Its main
+acquisition process remains a scaffold and does not yet record images or operate
+sensors. A separate Pi-tested Vimba X diagnostic captures bounded Mono8 previews
+and can calculate uncalibrated DoLP/AoP previews; it is not scientific acquisition.
 
 Planned hardware: three Allied Vision Mako G-223B PoE cameras, a BME280 over I2C,
 and an EPEVER Tracer 2210AN over USB-RS485/Modbus RTU. Camera serials, polarizer
@@ -87,18 +88,26 @@ queue. The dashboard only renders these snapshots.
 An initial hardware-preview path has been verified on the Pi 5. It is a bounded
 diagnostic, not scientific acquisition: the producer captures the three cameras
 sequentially in Mono8, publishes replaceable latest-frame previews, and records
-no observations. Frames are not synchronized or calibrated.
+no observations. Frames are not synchronized, registered, or calibrated.
+
+For the polarization diagnostic, use an ignored local configuration that maps
+the three camera IDs to the physically verified analyser angles 0°, 45°, and
+90°. Hardware IDs are intentionally not stored in this repository. When all
+three mapped frames are available, the dashboard shows a DoLP map on a fixed
+plasma 0–100% scale and a sensor-relative AoP map on a fixed cyclic cmocean phase
+0–180° scale. The page labels both products as sequential, unregistered,
+unsynchronized, and uncalibrated.
 
 With the SDK-matched VmbPy environment active and all three cameras discovered:
 
 ```sh
-polstation-camera-preview --config config/default.yaml --interval 1
+polstation-camera-preview --config config/local-preview.yaml --interval 1
 ```
 
 Run the read-only dashboard separately:
 
 ```sh
-polstation-dashboard --config config/default.yaml --hardware-preview
+polstation-dashboard --config config/local-preview.yaml --hardware-preview
 ```
 
 The dashboard continues to bind to Pi loopback. From the laptop, forward a local

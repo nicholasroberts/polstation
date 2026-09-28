@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Polstation · Camera previews</title>
+<title>Remote SkyPolStation · Camera previews</title>
 <link rel="stylesheet" href="/static/dashboard.css">
 <script src="/static/dashboard.js" defer></script>
 </head>
@@ -10,11 +10,19 @@
 <header><a class="brand" href="/">◉ <span>polstation</span></a><span class="header-note">SKY POLARIZATION INSTRUMENT</span><span class="local">● LOCAL PREVIEW</span></header>
 <main>
 <div class="banner" id="banner"><strong id="banner-title">DEMO — no cameras connected</strong><span id="banner-detail">All images and camera values are simulated. No scientific data is recorded.</span></div>
-<section class="heading"><div><div class="eyebrow">INSTRUMENT OVERVIEW</div><h1>A window into the sky.</h1><p>Three camera channels. One independent browser dashboard.</p></div><div class="clock"><span>YOUR LOCAL TIME</span><time id="clock">—</time></div></section>
+<section class="heading"><div><div class="eyebrow">INSTRUMENT OVERVIEW</div><h1>Remote SkyPolStation</h1><p>Three camera channels. One independent browser dashboard.</p></div><div class="clock"><span>YOUR LOCAL TIME</span><time id="clock">—</time></div></section>
 <section class="summary" aria-label="Preview summary"><div><span>PREVIEW SOURCE</span><strong id="source-label">Simulation</strong></div><div><span>CAMERA CHANNELS</span><strong id="channel-count">03 <small>planned</small></strong></div><div><span>PREVIEW REFRESH</span><strong>1 Hz <small>preview</small></strong></div><div><span>DATA RECORDING</span><strong>Off <small>preview only</small></strong></div></section>
 <section class="toolbar"><div><h2>Camera previews</h2><span id="connection" role="status">Connecting to preview source…</span></div><label id="scenario-control">Demo scenario <select id="scenario"><option value="live">All cameras live</option><option value="faults">Stale + disconnected</option></select></label></section>
 <div id="error" class="error" role="alert" hidden></div>
 <section id="cameras" class="cameras" aria-label="Camera previews"></section>
+<section id="polarization" class="polarization" aria-labelledby="polarization-title" hidden>
+  <div class="polarization-heading"><div><span class="eyebrow">DIAGNOSTIC DERIVED PREVIEW</span><h2 id="polarization-title">Linear polarization</h2></div><span id="polarization-status" role="status"></span></div>
+  <div class="science-warning">Sequential camera frames · spatially unregistered · temporally unsynchronized · radiometrically uncalibrated</div>
+  <div class="polarization-grid">
+    <article class="polarization-card"><div><span class="channel">DEGREE OF LINEAR POLARIZATION</span><h3>DoLP</h3></div><div class="derived-preview"><img id="dolp-preview" alt="Diagnostic degree of linear polarization map"><div class="derived-overlay" hidden></div></div><div class="legend"><img id="dolp-legend" alt="DoLP plasma colour scale"><div><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div></div></article>
+    <article class="polarization-card"><div><span class="channel">SENSOR-RELATIVE ANGLE OF POLARIZATION</span><h3>AoP</h3></div><div class="derived-preview"><img id="aop-preview" alt="Diagnostic sensor-relative angle of polarization map"><div class="derived-overlay" hidden></div></div><div class="legend"><img id="aop-legend" alt="AoP cyclic cmocean phase colour scale"><div><span>0°</span><span>45°</span><span>90°</span><span>135°</span><span>180°</span></div></div></article>
+  </div>
+</section>
 <section class="notes"><div><span class="eyebrow">PREVIEW BOUNDARY</span><h2>The browser is just the view.</h2><p>The camera producer runs separately on the Pi and publishes only bounded latest-frame previews. Closing this page does not control camera acquisition.</p></div><div><span class="eyebrow">SCIENTIFIC STATUS</span><h2>Preview is not an observation.</h2><p>These images are not synchronized, calibrated or recorded. Raw scientific capture and polarization processing remain separate milestones.</p></div></section>
 <footer><span>POLSTATION / DEVELOPMENT PREVIEW</span><span id="footer-status">Allied Vision Mako G-223B × 3</span></footer>
 </main>

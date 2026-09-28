@@ -40,6 +40,15 @@ class ScaffoldTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_config(path)
 
+        for angles in ([0, 45, None], [0, 45, 135], [False, 45, 90]):
+            config = copy.deepcopy(self.config)
+            for camera, angle in zip(config["cameras"], angles):
+                camera["polarizer_angle_deg"] = angle
+            path = Path(self.tmp.name) / "bad-angles.yaml"
+            path.write_text(yaml.safe_dump(config))
+            with self.assertRaisesRegex(ValueError, "polarizer angles"):
+                load_config(path)
+
     def test_no_observations_and_provenance(self):
         run(self.config, threading.Event(), once=True)
         status = read(self.config)

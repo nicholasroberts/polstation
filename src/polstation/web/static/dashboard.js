@@ -18,6 +18,29 @@ function markUnavailable(message) {
     card.querySelector('.overlay').textContent = card.querySelector('img').getAttribute('src') ? 'Preview unavailable · last image retained' : 'Preview unavailable · no image received';
   });
 }
+function renderPolarization(data, hardware) {
+  const section = document.querySelector('#polarization');
+  section.hidden = !hardware;
+  if (!hardware) return;
+  const polarization = data.polarization || {state: 'unavailable', error: 'No polarization preview received'};
+  const live = polarization.state === 'live';
+  document.querySelector('#polarization-status').textContent = live ? 'Diagnostic maps updating' : polarization.state === 'stale' ? 'Derived maps are stale' : polarization.error || 'Derived maps unavailable';
+  for (const [kind, label] of [['dolp', 'DoLP'], ['aop', 'AoP']]) {
+    const image = document.querySelector(`#${kind}-preview`);
+    const legend = document.querySelector(`#${kind}-legend`);
+    const preview = polarization[`${kind}_preview_png`];
+    const scale = polarization[`${kind}_legend_png`];
+    if (preview) image.src = `data:image/png;base64,${preview}`;
+    else image.removeAttribute('src');
+    if (scale) legend.src = `data:image/png;base64,${scale}`;
+    else legend.removeAttribute('src');
+    image.hidden = !preview;
+    legend.hidden = !scale;
+    const overlay = image.parentElement.querySelector('.derived-overlay');
+    overlay.hidden = live;
+    overlay.textContent = polarization.state === 'stale' ? `${label} preview is stale` : `${label} unavailable · ${polarization.error || 'waiting for configured camera frames'}`;
+  }
+}
 function render(data) {
   const hardware = data.mode === 'hardware-preview';
   document.querySelector('#scenario-control').hidden = hardware;
@@ -57,6 +80,7 @@ function render(data) {
     overlay.hidden = camera.state === 'live';
     overlay.textContent = camera.state === 'stale' ? 'Stale frame' : 'No current preview';
   });
+  renderPolarization(data, hardware);
 }
 async function refresh() {
   const ticket = ++sequence;

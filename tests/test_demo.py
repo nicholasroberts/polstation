@@ -62,7 +62,9 @@ class DemoTests(unittest.TestCase):
     def test_demo_api_and_assets(self):
         base = self.start_server(self.source)
         with urlopen(base) as response:
-            self.assertIn('DEMO — no cameras connected', response.read().decode())
+            page = response.read().decode()
+            self.assertIn('DEMO — no cameras connected', page)
+            self.assertIn('Remote SkyPolStation', page)
         for asset in ('dashboard.css', 'dashboard.js'):
             with urlopen(base + '/static/' + asset) as response:
                 self.assertEqual(response.status, 200)

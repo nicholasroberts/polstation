@@ -10,7 +10,7 @@ snapshot. The dashboard binds only to loopback and reads that snapshot.
 | cameras | Camera contracts, demo source, and bounded Vimba diagnostic previews |
 | sensors | Timestamped BME280 and EPEVER sample contracts; no drivers |
 | calibration | Reserved for calibration loading and validation |
-| polarization | Reserved for processing derived products |
+| polarization | Pure diagnostic Stokes/DoLP/AoP preview processing and fixed colour scales |
 | logging | Structured stdout logging for journald |
 | storage | Paths, free-space checks, atomic JSON publication |
 | health | Provenance-bearing scaffold heartbeat and stale detection |
@@ -62,9 +62,14 @@ health remain unchanged.
 
 `polstation-camera-preview` is a separate, explicitly preview-only producer. It
 owns VmbPy and the cameras, captures sequential Mono8 frames, reduces them to
-bounded PNGs, and atomically replaces `camera-previews.json` in the state root.
+bounded PNGs, derives bounded DoLP/AoP diagnostic maps when local camera-angle
+mapping is complete, and atomically replaces `camera-previews.json` in the state root.
 It does not write observations. `polstation-dashboard --hardware-preview` reads
 that file through `FilePreviewSource`; the web process never imports VmbPy or
 opens a device. Old snapshots are marked stale using the configured dashboard
 threshold. This first implementation is for hardware evaluation, not the future
 scientific acquisition service or synchronized streaming.
+
+Polarization processing remains in the producer, not the HTTP request handler.
+Only derived PNGs and explicit validity flags cross the atomic snapshot boundary.
+No raw image is altered or stored by this preview path.

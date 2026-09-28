@@ -147,14 +147,23 @@ ssh -L 8080:127.0.0.1:8000 admin@192.168.2.2
 
 The Mac browser used `http://127.0.0.1:8080`; port 8000 remained bound only to
 Pi loopback. Three changing real-camera panels were visually observed. Covering
-each lens in turn is the required physical mapping check before assigning camera
-roles or analyser angles.
+each lens in turn established the local analyser mapping as camera slot 1 = 0°,
+slot 2 = 45°, and slot 3 = 90°. Full device identifiers remain in ignored
+Pi-local configuration rather than this repository.
+
+A bounded derived preview was then implemented using the documented
+three-analyser equations and fixed DoLP/AoP colour scales. At the time of this
+entry, its numerical behavior was covered by hardware-independent tests;
+deployment to the Pi and visual inspection with the real camera scene remained
+to be completed.
 
 ## Verification performed
 
-- Hardware-independent suite on the Mac: 13 tests passed.
+- Hardware-independent suite on the Mac: 17 tests passed, including the
+  three-analyser half-angle convention and fixed colour-scale endpoints.
 - Configuration validation passed.
-- Updated demo dashboard rendered correctly in a browser.
+- Updated dashboard and diagnostic derived panels rendered correctly in a local
+  browser check using synthetic preview pixels; no browser console errors occurred.
 - Pi smoke-test snapshot reported `hardware_ready: true`, three live cameras,
   advancing software frame numbers, Mono8, and non-empty preview payloads.
 - The real dashboard returned HTTP 200 for its page, assets, and preview endpoint
@@ -164,7 +173,7 @@ roles or analyser angles.
 
 Before scientific or unattended operation:
 
-- assign and record physical camera roles without committing full serials;
+- retain physical camera roles in ignored local configuration without committing full serials;
 - choose and validate the permanent service/camera address plan;
 - select and verify the required raw pixel format and bit depth;
 - measure three-camera bandwidth, packet loss, and recovery behavior;

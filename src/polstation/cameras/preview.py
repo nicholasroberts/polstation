@@ -2,46 +2,67 @@
 
 import argparse
 import base64
-import binascii
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
 import signal
-import struct
 import threading
 import time
-import zlib
 
 from polstation.config import load_config
 from polstation.logging.setup import configure
+from polstation.polarization.preview import encode_png, legend_rgb, polarization_rgb, sample_mono8
 from polstation.storage.layout import prepare
 from polstation.storage.manifests import write_json
 
 logger = logging.getLogger(__name__)
 
 
-def _png_chunk(kind, data):
-    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", binascii.crc32(kind + data) & 0xFFFFFFFF)
-
-
 def mono8_preview_png(buffer, width, height, *, max_width=640, max_height=400):
     """Encode a bounded downsampled Mono8 frame as a browser-native PNG."""
-    if width <= 0 or height <= 0:
-        raise ValueError("frame dimensions must be positive")
-    pixels = memoryview(buffer).cast("B")
-    if len(pixels) < width * height:
-        raise ValueError("frame buffer is smaller than its dimensions")
-    step = max(1, (width + max_width - 1) // max_width, (height + max_height - 1) // max_height)
-    sampled_width = (width + step - 1) // step
-    sampled_height = (height + step - 1) // step
-    rows = []
-    for y in range(0, height, step):
-        start = y * width
-        rows.append(b"\0" + bytes(pixels[start:start + width:step]))
-    header = struct.pack(">IIBBBBB", sampled_width, sampled_height, 8, 0, 0, 0, 0)
-    return b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", header) + _png_chunk(b"IDAT", zlib.compress(b"".join(rows), 3)) + _png_chunk(b"IEND", b"")
+    sampled_width, sampled_height, pixels = sample_mono8(
+        buffer, width, height, max_width=max_width, max_height=max_height
+    )
+    return encode_png(pixels, sampled_width, sampled_height)
+
+
+def _polarization_snapshot(config, sampled):
+    configured = [camera for camera in config["cameras"] if camera["polarizer_angle_deg"] is not None]
+    if not configured:
+        return {"state": "unconfigured", "error": "Set local camera IDs and analyser angles 0, 45, and 90"}
+    try:
+        by_angle = {camera["polarizer_angle_deg"]: sampled[camera["id"]] for camera in configured}
+        dimensions = {(item[0], item[1]) for item in by_angle.values()}
+        if len(dimensions) != 1:
+            raise ValueError("camera preview dimensions differ")
+        width, height = dimensions.pop()
+        dolp, aop = polarization_rgb(by_angle[0][2], by_angle[45][2], by_angle[90][2])
+        def encode(value):
+            return base64.b64encode(value).decode("ascii")
+
+        return {
+            "state": "live",
+            "registered": False,
+            "synchronized": False,
+            "calibrated": False,
+            "aop_reference": "sensor-relative",
+            "width": width,
+            "height": height,
+            "dolp_preview_png": encode(encode_png(dolp, width, height, channels=3)),
+            "aop_preview_png": encode(encode_png(aop, width, height, channels=3)),
+            "dolp_legend_png": encode(encode_png(legend_rgb("dolp"), 256, 12, channels=3)),
+            "aop_legend_png": encode(encode_png(legend_rgb("aop"), 256, 12, channels=3)),
+        }
+    except (KeyError, ValueError) as error:
+        return {
+            "state": "unavailable",
+            "error": str(error),
+            "registered": False,
+            "synchronized": False,
+            "calibrated": False,
+        }
 
 
 def _read_feature(camera, *names):
@@ -78,6 +99,8 @@ class FilePreviewSource:
             value["hardware_ready"] = bool(value["cameras"]) and all(
                 camera["state"] == "live" for camera in value["cameras"]
             )
+            if not value["hardware_ready"] and value.get("polarization", {}).get("state") == "live":
+                value["polarization"]["state"] = "stale"
             return value
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
             return {"schema_version": 1, "mode": self.mode, "hardware_ready": False,
@@ -115,6 +138,7 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                 while not stop.is_set():
                     cycle_started = time.monotonic()
                     snapshots = []
+                    sampled = {}
                     for camera in opened:
                         camera_id = camera.get_id()
                         try:
@@ -122,7 +146,9 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                             if frame.get_status() != FrameStatus.Complete:
                                 raise RuntimeError(f"incomplete frame: {frame.get_status()}")
                             width, height = frame.get_width(), frame.get_height()
-                            encoded = base64.b64encode(mono8_preview_png(bytes(frame.get_buffer()), width, height)).decode("ascii")
+                            preview_width, preview_height, preview_pixels = sample_mono8(bytes(frame.get_buffer()), width, height)
+                            sampled[camera_id] = (preview_width, preview_height, preview_pixels)
+                            encoded = base64.b64encode(encode_png(preview_pixels, preview_width, preview_height)).decode("ascii")
                             counters[camera_id] = counters.get(camera_id, 0) + 1
                             snapshots.append({
                                 "id": camera_id, "model": camera.get_model(), "state": "live",
@@ -144,6 +170,7 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                                        "hardware_ready": all(item["state"] == "live" for item in snapshots),
                                        "recording": False, "synchronization": "unverified",
                                        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                                       "polarization": _polarization_snapshot(config, sampled),
                                        "cameras": snapshots}, replace=True)
                     stop.wait(max(0.0, interval - (time.monotonic() - cycle_started)))
             finally:

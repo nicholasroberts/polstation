@@ -26,6 +26,10 @@ def load_config(path):
     for camera in cameras:
         if camera["model"] != "Allied Vision Mako G-223B":
             raise ValueError("unexpected camera model")
+    angles = [camera["polarizer_angle_deg"] for camera in cameras]
+    if any(angle is not None for angle in angles):
+        if any(isinstance(angle, bool) for angle in angles) or set(angles) != {0, 45, 90}:
+            raise ValueError("camera polarizer angles must be all null or exactly 0, 45, and 90 degrees")
     for name in ("heartbeat_seconds", "retry_initial_seconds", "retry_max_seconds"):
         positive(config["acquisition"][name], name)
     if config["acquisition"]["retry_initial_seconds"] > config["acquisition"]["retry_max_seconds"]:
