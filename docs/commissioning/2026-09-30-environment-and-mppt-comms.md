@@ -2,8 +2,8 @@
 
 Date: 2026-09-30  
 Platform: Raspberry Pi 5, Debian 13 (arm64)  
-Status: basic read-only communications verified; diagnostic producer implemented,
-pending deployment verification on the Pi
+Status: read-only communications and the diagnostic dashboard path verified on
+the Pi; not yet a persistent service or scientific observation path
 
 This session established communication with the installed BME280 environmental
 sensor and EPEVER Tracer 2210AN MPPT controller. It did not calibrate either
@@ -74,6 +74,33 @@ Energy counters were readable. At this early test they reported 0.01 kWh total
 consumed and 0.00 kWh total generated. Counter semantics, rollover, persistence,
 and agreement with independent measurements still require validation.
 
+## End-to-end diagnostic dashboard verification
+
+Commit `f797f39` was deployed to the Pi. The optional `sensor-preview`
+dependencies installed successfully into the existing VmbPy virtual environment,
+and the ignored local configuration passed validation. The independent sensor
+producer published a bounded `sensor-preview.json` snapshot every five seconds.
+Both links reported `live`; representative sample durations were 27.5 ms for the
+BME280 and 179.7 ms for the EPEVER register group.
+
+The camera producer, sensor producer, and loopback-bound dashboard were then run
+as three separate processes. The dashboard API reported:
+
+- three camera states `live`;
+- BME280 and EPEVER states `live`; and
+- polarization preview state `live`.
+
+The browser dashboard was inspected through an SSH tunnel from laptop port 8080
+to Pi loopback port 8000. It displayed all three camera previews, diagnostic
+DoLP/AoP maps, BME280 temperature/pressure/humidity, and the selected solar,
+battery, load, energy, temperature, charging, and controller-status values.
+The tunnel was closed independently, after which all three Pi processes were
+stopped cleanly with `SIGINT`.
+
+This verified the diagnostic data path and process separation only. The processes
+were launched from an interactive shell, not systemd; the values were neither
+recorded as observations nor independently calibrated.
+
 ## Local configuration retained
 
 The ignored Pi-local configuration now records:
@@ -90,8 +117,9 @@ temperature sensor as zero.
 
 ## Remaining work
 
-- Deploy and verify the bounded, timestamped diagnostic sensor producer on the Pi.
 - Promote the diagnostic adapters into the future observation acquisition design.
+- Add and verify separate persistent systemd services for camera preview, sensor
+  preview, and the loopback dashboard.
 - Record sampling time, read duration, register source, units, and validity.
 - Decide polling intervals and retry behavior, then test disconnect/reconnect.
 - Validate BME280 readings against suitable references and its installed thermal environment.
