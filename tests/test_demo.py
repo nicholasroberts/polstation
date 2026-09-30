@@ -1,6 +1,8 @@
 """Check preview isolation, fault semantics and the actual HTTP boundary."""
 import json
 from pathlib import Path
+import struct
+import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
@@ -8,6 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from polstation.cameras.demo import DemoPreviewSource
+from polstation.cameras.preview import FilePreviewSource, mono8_preview_png
 from polstation.config import load_config
 from polstation.web.app import make_handler
 
@@ -59,7 +62,10 @@ class DemoTests(unittest.TestCase):
     def test_demo_api_and_assets(self):
         base = self.start_server(self.source)
         with urlopen(base) as response:
-            self.assertIn('DEMO — no cameras connected', response.read().decode())
+            page = response.read().decode()
+            self.assertIn('DEMO — no cameras connected', page)
+            self.assertIn('Remote SkyPolStation', page)
+            self.assertIn('Environment and power', page)
         for asset in ('dashboard.css', 'dashboard.js'):
             with urlopen(base + '/static/' + asset) as response:
                 self.assertEqual(response.status, 200)
@@ -78,3 +84,32 @@ class DemoTests(unittest.TestCase):
             urlopen(base + '/api/previews')
         self.assertEqual(caught.exception.code, 404)
         caught.exception.close()
+
+    def test_mono8_preview_is_bounded_png(self):
+        image = mono8_preview_png(bytes(range(24)), 6, 4, max_width=3, max_height=2)
+        self.assertEqual(image[:8], b'\x89PNG\r\n\x1a\n')
+        self.assertEqual(struct.unpack('>II', image[16:24]), (3, 2))
+
+    def test_file_preview_source_reads_latest_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.config['storage']['state_root'] = directory
+            source = FilePreviewSource(self.config)
+            self.assertFalse(source.snapshot()['hardware_ready'])
+            value = {'mode': 'hardware-preview', 'hardware_ready': True, 'recording': False,
+                     'synchronization': 'unverified', 'cameras': [{
+                         'id': 'camera', 'state': 'live',
+                         'captured_at_utc': '2000-01-01T00:00:00+00:00'}]}
+            (Path(directory) / 'camera-previews.json').write_text(json.dumps(value))
+            sensors = {'mode': 'hardware-sensors', 'sensors': {
+                'bme280': {'state': 'live', 'sampled_at_utc': '2000-01-01T00:00:00+00:00',
+                           'values': {'temperature_c': 18.2}},
+                'epever': {'state': 'unavailable', 'sampled_at_utc': None, 'values': {}}}}
+            (Path(directory) / 'sensor-preview.json').write_text(json.dumps(sensors))
+            snapshot = source.snapshot()
+            self.assertFalse(snapshot['hardware_ready'])
+            self.assertGreater(snapshot['cameras'][0]['age_seconds'], 0)
+            self.assertEqual(snapshot['cameras'][0]['state'], 'stale')
+            self.assertEqual(snapshot['sensors']['bme280']['state'], 'stale')
+            self.assertEqual(snapshot['sensors']['epever']['state'], 'unavailable')
+            with self.assertRaises(ValueError):
+                source.snapshot('faults')

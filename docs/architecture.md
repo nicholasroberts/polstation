@@ -7,10 +7,10 @@ snapshot. The dashboard binds only to loopback and reads that snapshot.
 | Package | Responsibility |
 | --- | --- |
 | acquisition | Lifecycle, cancellation, bounded storage retries; future scheduling |
-| cameras | Three camera adapter contracts; no SDK or acquisition implementation |
-| sensors | Timestamped BME280 and EPEVER sample contracts; no drivers |
+| cameras | Camera contracts, demo source, and bounded Vimba diagnostic previews |
+| sensors | Timestamped contracts and bounded read-only BME280/EPEVER diagnostic producer |
 | calibration | Reserved for calibration loading and validation |
-| polarization | Reserved for processing derived products |
+| polarization | Pure diagnostic Stokes/DoLP/AoP preview processing and fixed colour scales |
 | logging | Structured stdout logging for journald |
 | storage | Paths, free-space checks, atomic JSON publication |
 | health | Provenance-bearing scaffold heartbeat and stale detection |
@@ -21,9 +21,10 @@ errors retry with capped exponential delay, and waits can be interrupted by
 SIGTERM. Invalid configuration fails startup. No data deletion or simulated
 observations occur. The health file can become stale when status writes fail.
 
-Still required for field operation: verified camera SDK support on the target Pi,
-PoE and network provisioning, measured synchronization, actual drivers, exposure
-control, scientific validation, hung-driver isolation, watchdog integration,
+Still required for field operation: vendor-supported camera SDK operation on the
+target Pi, permanent network provisioning, measured synchronization, production
+acquisition, exposure control, scientific validation, hung-driver isolation,
+watchdog integration,
 power-loss testing, storage endurance and capacity planning, backup monitoring,
 and long-duration soak testing. Restarting a crashed process does not detect all
 hangs; no systemd watchdog or hardware watchdog is claimed by this scaffold.
@@ -35,15 +36,17 @@ and TSW101 network. The dashboard listens on Pi loopback port 8000; SSH forwards
 laptop port 8080 to it. Acquisition must remain autonomous when the laptop,
 browser, dashboard process or tunnel disconnects.
 
-Future dashboard views include three camera previews, exposure/integration time,
-gain, acquisition countdown, BME280 temperature/pressure/humidity, EPEVER
-PV/battery/load telemetry, disk capacity, camera/network status and warnings.
-None of these hardware displays or controls is implemented by this scaffold.
+Dashboard views now include three diagnostic camera previews, exposure/gain
+readbacks, BME280 temperature/pressure/humidity, and selected EPEVER
+PV/battery/load/status telemetry. Future views include acquisition countdown,
+disk capacity, richer camera/network status and warnings. Hardware controls are
+not implemented by this scaffold.
 Previews must be derived separately without modifying preserved raw images.
 Any future control API belongs behind the acquisition/controller boundary;
 the dashboard must never open camera or sensor devices directly. Today the
-process boundary is an atomic read-only health file exposed by the dashboard's
-HTTP API; a controller command API is deliberately deferred.
+process boundary consists of atomic read-only health and diagnostic-preview
+files exposed by the dashboard's HTTP API; a controller command API is
+deliberately deferred.
 
 ## Local preview demo
 
@@ -53,6 +56,35 @@ one Hz and shows inline SVG images, timestamps and fault states. Static assets
 are bundled with the Python package. No third-party browser assets are loaded.
 Demo source generation is request-driven, not an acquisition loop, and performs
 no scientific storage writes. The normal scaffold dashboard and acquisition
-health remain unchanged. A later real preview source should read bounded latest-
-frame snapshots from the independent acquisition worker without owning devices
-inside the web process.
+health remain unchanged.
+
+## Real-camera diagnostic preview
+
+`polstation-camera-preview` is a separate, explicitly preview-only producer. It
+owns VmbPy and the cameras, captures sequential Mono8 frames, reduces them to
+bounded PNGs, derives bounded DoLP/AoP diagnostic maps when local camera-angle
+mapping is complete, and atomically replaces `camera-previews.json` in the state root.
+It does not write observations. `polstation-dashboard --hardware-preview` reads
+that file through `FilePreviewSource`; the web process never imports VmbPy or
+opens a device. Old snapshots are marked stale using the configured dashboard
+threshold. This first implementation is for hardware evaluation, not the future
+scientific acquisition service or synchronized streaming.
+
+Polarization processing remains in the producer, not the HTTP request handler.
+Only derived PNGs and explicit validity flags cross the atomic snapshot boundary.
+No raw image is altered or stored by this preview path.
+
+## Real-sensor diagnostic preview
+
+`polstation-sensor-preview` runs independently of both camera preview and web
+processes. At a bounded interval it opens I2C for one compensated BME280 sample
+and issues only documented Modbus function-code 4 input-register reads to the
+EPEVER controller. It closes device handles after the sample and atomically
+replaces `sensor-preview.json`; it does not write observations or controller
+settings. A failure in one adapter is represented explicitly and does not hide a
+successful sample from the other.
+
+`FilePreviewSource` merges this latest-value file into the existing read-only
+dashboard response and calculates sample ages. The browser and HTTP handler never
+import the hardware drivers or open either device. Production sampling schedules,
+validation, observation storage, retries, and services remain future work.

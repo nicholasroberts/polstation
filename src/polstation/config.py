@@ -26,6 +26,10 @@ def load_config(path):
     for camera in cameras:
         if camera["model"] != "Allied Vision Mako G-223B":
             raise ValueError("unexpected camera model")
+    angles = [camera["polarizer_angle_deg"] for camera in cameras]
+    if any(angle is not None for angle in angles):
+        if any(isinstance(angle, bool) for angle in angles) or set(angles) != {0, 45, 90}:
+            raise ValueError("camera polarizer angles must be all null or exactly 0, 45, and 90 degrees")
     for name in ("heartbeat_seconds", "retry_initial_seconds", "retry_max_seconds"):
         positive(config["acquisition"][name], name)
     if config["acquisition"]["retry_initial_seconds"] > config["acquisition"]["retry_max_seconds"]:
@@ -39,8 +43,28 @@ def load_config(path):
         raise ValueError("dashboard port must be an integer between 1 and 65535")
     if config["sensors"]["bme280"]["interface"] != "i2c":
         raise ValueError("BME280 interface must be i2c")
+    bme280 = config["sensors"]["bme280"]
+    if bme280["bus"] is not None or bme280["address"] is not None:
+        if type(bme280["bus"]) is not int or bme280["bus"] < 0:
+            raise ValueError("BME280 bus must be a nonnegative integer")
+        if type(bme280["address"]) is not int or not 0x03 <= bme280["address"] <= 0x77:
+            raise ValueError("BME280 address must be a valid 7-bit I2C address")
     if config["sensors"]["epever"]["interface"] != "usb-rs485-modbus-rtu":
         raise ValueError("EPEVER interface must be usb-rs485-modbus-rtu")
+    epever = config["sensors"]["epever"]
+    serial_names = ("device", "slave_address", "baudrate", "parity", "stopbits")
+    serial_values = [epever[name] for name in serial_names]
+    if any(value is not None for value in serial_values):
+        if any(value is None for value in serial_values):
+            raise ValueError("EPEVER serial settings must be configured together")
+        if not isinstance(epever["device"], str) or not epever["device"].startswith("/dev/serial/by-id/"):
+            raise ValueError("EPEVER device must use a stable /dev/serial/by-id path")
+        if type(epever["slave_address"]) is not int or not 1 <= epever["slave_address"] <= 247:
+            raise ValueError("EPEVER slave address must be an integer from 1 to 247")
+        if type(epever["baudrate"]) is not int or epever["baudrate"] <= 0:
+            raise ValueError("EPEVER baudrate must be a positive integer")
+        if epever["parity"] not in ("N", "E", "O") or epever["stopbits"] not in (1, 2):
+            raise ValueError("EPEVER parity/stopbits are invalid")
     provenance = config["provenance"]
     for key in ("git_commit", "release_tag", "calibration_id"):
         if provenance[key] is not None and not isinstance(provenance[key], str):
