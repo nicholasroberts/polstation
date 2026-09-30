@@ -41,6 +41,54 @@ function renderPolarization(data, hardware) {
     overlay.textContent = polarization.state === 'stale' ? `${label} preview is stale` : `${label} unavailable · ${polarization.error || 'waiting for configured camera frames'}`;
   }
 }
+function displayNumber(value, digits, unit) {
+  return Number.isFinite(value) ? `${value.toFixed(digits)} ${unit}` : '—';
+}
+function sensorBadge(card, sensor, fault = false) {
+  const badge = card.querySelector('.sensor-badge');
+  card.dataset.state = fault ? 'fault' : sensor.state;
+  badge.textContent = fault ? 'Fault reported' : sensor.state === 'live' ? '● Live' : sensor.state === 'stale' ? 'Stale' : 'Unavailable';
+}
+function sampleAge(sensor) {
+  return Number.isFinite(sensor.age_seconds) ? `Sample age · ${sensor.age_seconds.toFixed(1)} s` : 'No current sample';
+}
+function renderSensors(data, hardware) {
+  const section = document.querySelector('#telemetry');
+  section.hidden = !hardware;
+  if (!hardware) return;
+  const sensors = data.sensors || {};
+  const environment = sensors.bme280 || {state: 'unavailable', values: {}};
+  const controller = sensors.epever || {state: 'unavailable', values: {}};
+  const env = environment.values || {};
+  const power = controller.values || {};
+  const environmentCard = document.querySelector('#environment-card');
+  sensorBadge(environmentCard, environment);
+  document.querySelector('#env-temperature').textContent = displayNumber(env.temperature_c, 1, '°C');
+  document.querySelector('#env-humidity').textContent = displayNumber(env.humidity_percent, 1, '%RH');
+  document.querySelector('#env-pressure').textContent = displayNumber(env.pressure_hpa, 1, 'hPa');
+  document.querySelector('#environment-age').textContent = sampleAge(environment);
+
+  const fault = power.controller_fault === true;
+  for (const id of ['solar-card', 'battery-card', 'power-card']) sensorBadge(document.querySelector(`#${id}`), controller, fault);
+  document.querySelector('#pv-power').textContent = displayNumber(power.pv_power_w, 1, 'W');
+  document.querySelector('#pv-voltage').textContent = displayNumber(power.pv_voltage_v, 2, 'V');
+  document.querySelector('#pv-current').textContent = displayNumber(power.pv_current_a, 2, 'A');
+  document.querySelector('#charge-stage').textContent = power.charging_stage || '—';
+  document.querySelector('#pv-state').textContent = power.pv_input_state || '—';
+  document.querySelector('#battery-soc').textContent = displayNumber(power.battery_soc_percent, 0, '%');
+  document.querySelector('#battery-voltage').textContent = displayNumber(power.battery_voltage_v, 2, 'V');
+  document.querySelector('#battery-current').textContent = displayNumber(power.battery_net_current_a, 2, 'A');
+  document.querySelector('#battery-temperature').textContent = displayNumber(power.battery_temperature_c, 1, '°C');
+  document.querySelector('#battery-state').textContent = power.battery_voltage_state || '—';
+  document.querySelector('#load-power').textContent = displayNumber(power.load_power_w, 1, 'W');
+  document.querySelector('#load-current').textContent = displayNumber(power.load_current_a, 2, 'A');
+  document.querySelector('#controller-temperature').textContent = displayNumber(power.controller_temperature_c, 1, '°C');
+  document.querySelector('#generated-today').textContent = displayNumber(power.generated_today_kwh, 2, 'kWh');
+  document.querySelector('#consumed-today').textContent = displayNumber(power.consumed_today_kwh, 2, 'kWh');
+  document.querySelector('#controller-age').textContent = sampleAge(controller);
+  const liveCount = [environment, controller].filter(sensor => sensor.state === 'live').length;
+  document.querySelector('#telemetry-status').textContent = fault ? 'MPPT controller fault reported' : `${liveCount}/2 sensor links live · read-only`;
+}
 function render(data) {
   const hardware = data.mode === 'hardware-preview';
   document.querySelector('#scenario-control').hidden = hardware;
@@ -49,6 +97,7 @@ function render(data) {
   document.querySelector('#source-label').textContent = hardware ? 'Vimba X · real cameras' : 'Simulation';
   document.querySelector('#channel-count').textContent = String(data.cameras.length).padStart(2, '0');
   document.querySelector('#footer-status').textContent = hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
+  renderSensors(data, hardware);
   const currentIds = new Set(data.cameras.map(camera => camera.id));
   cards.forEach((card, id) => { if (!currentIds.has(id)) { card.remove(); cards.delete(id); } });
   data.cameras.forEach((camera, index) => {

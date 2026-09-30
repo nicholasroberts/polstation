@@ -49,6 +49,20 @@ class ScaffoldTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "polarizer angles"):
                 load_config(path)
 
+        config = copy.deepcopy(self.config)
+        config["sensors"]["bme280"].update({"bus": 1, "address": None})
+        path = Path(self.tmp.name) / "bad-bme280.yaml"
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "BME280 address"):
+            load_config(path)
+
+        config = copy.deepcopy(self.config)
+        config["sensors"]["epever"]["device"] = "/dev/ttyACM0"
+        path = Path(self.tmp.name) / "bad-epever.yaml"
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "configured together"):
+            load_config(path)
+
     def test_no_observations_and_provenance(self):
         run(self.config, threading.Event(), once=True)
         status = read(self.config)

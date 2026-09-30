@@ -81,7 +81,28 @@ class FilePreviewSource:
 
     def __init__(self, config):
         self.path = Path(config["storage"]["state_root"]) / "camera-previews.json"
+        self.sensor_path = Path(config["storage"]["state_root"]) / "sensor-preview.json"
         self.stale_after_seconds = config["dashboard"]["stale_after_seconds"]
+
+    def _sensor_snapshot(self, now):
+        try:
+            value = json.loads(self.sensor_path.read_text())
+            if value.get("mode") != "hardware-sensors" or not isinstance(value.get("sensors"), dict):
+                raise ValueError("invalid sensor snapshot")
+            for sensor in value["sensors"].values():
+                sampled = sensor.get("sampled_at_utc")
+                sensor["age_seconds"] = max(
+                    0.0, (now - datetime.fromisoformat(sampled)).total_seconds()
+                ) if sampled else None
+                if sensor.get("state") == "live" and sensor["age_seconds"] > self.stale_after_seconds:
+                    sensor["state"] = "stale"
+            return value["sensors"]
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return {
+                name: {"state": "unavailable", "sampled_at_utc": None,
+                       "age_seconds": None, "values": {}, "error": str(error)}
+                for name in ("bme280", "epever")
+            }
 
     def snapshot(self, scenario="live"):
         if scenario != "live":
@@ -101,11 +122,13 @@ class FilePreviewSource:
             )
             if not value["hardware_ready"] and value.get("polarization", {}).get("state") == "live":
                 value["polarization"]["state"] = "stale"
+            value["sensors"] = self._sensor_snapshot(now)
             return value
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
             return {"schema_version": 1, "mode": self.mode, "hardware_ready": False,
                     "recording": False, "synchronization": "unverified",
-                    "error": str(error), "cameras": []}
+                    "error": str(error), "cameras": [],
+                    "sensors": self._sensor_snapshot(datetime.now(timezone.utc))}
 
 
 def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):

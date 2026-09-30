@@ -65,6 +65,7 @@ class DemoTests(unittest.TestCase):
             page = response.read().decode()
             self.assertIn('DEMO — no cameras connected', page)
             self.assertIn('Remote SkyPolStation', page)
+            self.assertIn('Environment and power', page)
         for asset in ('dashboard.css', 'dashboard.js'):
             with urlopen(base + '/static/' + asset) as response:
                 self.assertEqual(response.status, 200)
@@ -99,9 +100,16 @@ class DemoTests(unittest.TestCase):
                          'id': 'camera', 'state': 'live',
                          'captured_at_utc': '2000-01-01T00:00:00+00:00'}]}
             (Path(directory) / 'camera-previews.json').write_text(json.dumps(value))
+            sensors = {'mode': 'hardware-sensors', 'sensors': {
+                'bme280': {'state': 'live', 'sampled_at_utc': '2000-01-01T00:00:00+00:00',
+                           'values': {'temperature_c': 18.2}},
+                'epever': {'state': 'unavailable', 'sampled_at_utc': None, 'values': {}}}}
+            (Path(directory) / 'sensor-preview.json').write_text(json.dumps(sensors))
             snapshot = source.snapshot()
             self.assertFalse(snapshot['hardware_ready'])
             self.assertGreater(snapshot['cameras'][0]['age_seconds'], 0)
             self.assertEqual(snapshot['cameras'][0]['state'], 'stale')
+            self.assertEqual(snapshot['sensors']['bme280']['state'], 'stale')
+            self.assertEqual(snapshot['sensors']['epever']['state'], 'unavailable')
             with self.assertRaises(ValueError):
                 source.snapshot('faults')

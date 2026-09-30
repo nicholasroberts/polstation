@@ -4,7 +4,8 @@ Python scaffold for a Raspberry Pi 5 sky-polarization instrument intended for a
 year-long unattended deployment. **This is not field-ready software.** Its main
 acquisition process remains a scaffold and does not yet record images or operate
 sensors. A separate Pi-tested Vimba X diagnostic captures bounded Mono8 previews
-and can calculate uncalibrated DoLP/AoP previews; it is not scientific acquisition.
+and can calculate uncalibrated DoLP/AoP previews. A separate read-only sensor
+diagnostic publishes BME280 and EPEVER telemetry; neither path is scientific acquisition.
 
 Planned hardware: three Allied Vision Mako G-223B PoE cameras, a BME280 over I2C,
 and an EPEVER Tracer 2210AN over USB-RS485/Modbus RTU. Camera serials, polarizer
@@ -121,6 +122,33 @@ The producer temporarily selects a 1500-byte camera packet, Mono8, and free-run
 triggering, and restores the preceding values on clean shutdown. Stop it with
 `Ctrl+C`. Do not use this path as evidence of synchronized exposure or raw-data
 preservation.
+
+## Diagnostic environment and power telemetry
+
+The BME280 and EPEVER links were verified on the Pi. Install the optional drivers
+in the same environment as the application:
+
+```sh
+python -m pip install -e '.[sensor-preview]'
+```
+
+With an ignored local configuration containing the verified I2C and stable
+`/dev/serial/by-id/` settings, run the independent read-only producer:
+
+```sh
+polstation-sensor-preview --config config/local-preview.yaml --interval 5
+```
+
+When the camera producer and `polstation-dashboard --hardware-preview` are also
+running, the dashboard displays all BME280 measurements plus selected operational
+MPPT telemetry: PV input, battery voltage/net current/SOC, load, temperatures,
+charging and fault states, and generated/consumed energy today. Each sensor has
+its own timestamp, age, and explicit unavailable/stale state. The producer uses
+only Modbus input-register reads and never changes controller settings.
+
+This remains a commissioning diagnostic. The BME280 is not field calibrated;
+MPPT quantities and counters have not been independently validated; and neither
+producer writes observations.
 
 ## Repository and deployment
 

@@ -2,7 +2,8 @@
 
 Date: 2026-09-30  
 Platform: Raspberry Pi 5, Debian 13 (arm64)  
-Status: basic read-only communications verified; production adapters not yet implemented
+Status: basic read-only communications verified; diagnostic producer implemented,
+pending deployment verification on the Pi
 
 This session established communication with the installed BME280 environmental
 sensor and EPEVER Tracer 2210AN MPPT controller. It did not calibrate either
@@ -89,14 +90,13 @@ temperature sensor as zero.
 
 ## Remaining work
 
-- Add bounded, timestamped BME280 and MPPT acquisition adapters.
+- Deploy and verify the bounded, timestamped diagnostic sensor producer on the Pi.
+- Promote the diagnostic adapters into the future observation acquisition design.
 - Record sampling time, read duration, register source, units, and validity.
 - Decide polling intervals and retry behavior, then test disconnect/reconnect.
 - Validate BME280 readings against suitable references and its installed thermal environment.
 - Validate MPPT voltage/current/power and energy counters independently.
-- Expose read-only sensor status to the dashboard without coupling hardware to HTTP requests.
-- Include the drivers in a reproducible deployment environment rather than relying
-  on this commissioning environment's manually installed packages.
+- Confirm the optional sensor dependencies install reproducibly on a clean Pi environment.
 
 ## References
 

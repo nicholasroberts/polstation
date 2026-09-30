@@ -8,7 +8,7 @@ snapshot. The dashboard binds only to loopback and reads that snapshot.
 | --- | --- |
 | acquisition | Lifecycle, cancellation, bounded storage retries; future scheduling |
 | cameras | Camera contracts, demo source, and bounded Vimba diagnostic previews |
-| sensors | Timestamped BME280 and EPEVER sample contracts; no drivers |
+| sensors | Timestamped contracts and bounded read-only BME280/EPEVER diagnostic producer |
 | calibration | Reserved for calibration loading and validation |
 | polarization | Pure diagnostic Stokes/DoLP/AoP preview processing and fixed colour scales |
 | logging | Structured stdout logging for journald |
@@ -36,11 +36,11 @@ and TSW101 network. The dashboard listens on Pi loopback port 8000; SSH forwards
 laptop port 8080 to it. Acquisition must remain autonomous when the laptop,
 browser, dashboard process or tunnel disconnects.
 
-Dashboard views now include three diagnostic camera previews and exposure/gain
-readbacks. Future views include acquisition countdown, BME280
-temperature/pressure/humidity, EPEVER
-PV/battery/load telemetry, disk capacity, camera/network status and warnings.
-Sensor displays and hardware controls are not implemented by this scaffold.
+Dashboard views now include three diagnostic camera previews, exposure/gain
+readbacks, BME280 temperature/pressure/humidity, and selected EPEVER
+PV/battery/load/status telemetry. Future views include acquisition countdown,
+disk capacity, richer camera/network status and warnings. Hardware controls are
+not implemented by this scaffold.
 Previews must be derived separately without modifying preserved raw images.
 Any future control API belongs behind the acquisition/controller boundary;
 the dashboard must never open camera or sensor devices directly. Today the
@@ -73,3 +73,18 @@ scientific acquisition service or synchronized streaming.
 Polarization processing remains in the producer, not the HTTP request handler.
 Only derived PNGs and explicit validity flags cross the atomic snapshot boundary.
 No raw image is altered or stored by this preview path.
+
+## Real-sensor diagnostic preview
+
+`polstation-sensor-preview` runs independently of both camera preview and web
+processes. At a bounded interval it opens I2C for one compensated BME280 sample
+and issues only documented Modbus function-code 4 input-register reads to the
+EPEVER controller. It closes device handles after the sample and atomically
+replaces `sensor-preview.json`; it does not write observations or controller
+settings. A failure in one adapter is represented explicitly and does not hide a
+successful sample from the other.
+
+`FilePreviewSource` merges this latest-value file into the existing read-only
+dashboard response and calculates sample ages. The browser and HTTP handler never
+import the hardware drivers or open either device. Production sampling schedules,
+validation, observation storage, retries, and services remain future work.
