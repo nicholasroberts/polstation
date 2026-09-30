@@ -165,6 +165,7 @@ future scientific acquisition service.
 - [First SSH and Vimba X camera bring-up](docs/first-boot.md)
 - [2026-09-28 Pi/Vimba X commissioning record](docs/commissioning/2026-09-28-pi5-vimbax-camera-bring-up.md)
 - [2026-09-30 BME280 and EPEVER communications record](docs/commissioning/2026-09-30-environment-and-mppt-comms.md)
+- [2026-09-30 persistent preview-services record](docs/commissioning/2026-09-30-systemd-preview-services.md)
 - [Local → GitHub → Pi workflow](docs/deployment.md)
 - [Operations and recovery](docs/operations.md)
 
