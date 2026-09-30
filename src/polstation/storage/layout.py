@@ -8,5 +8,10 @@ def prepare(config):
         Path(config["storage"][key]).mkdir(parents=True, exist_ok=True)
 
 
+def prepare_state(config):
+    """Create only replaceable runtime state storage for diagnostic producers."""
+    Path(config["storage"]["state_root"]).mkdir(parents=True, exist_ok=True)
+
+
 def free_bytes(config):
     return shutil.disk_usage(config["storage"]["data_root"]).free

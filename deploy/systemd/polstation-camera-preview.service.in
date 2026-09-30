@@ -1,0 +1,30 @@
+# Replace @INSTALL_ROOT@ with the absolute installed release path.
+[Unit]
+Description=Polstation Vimba X camera preview producer
+After=local-fs.target network-online.target
+Wants=network-online.target
+PartOf=polstation-preview.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=polstation
+Group=polstation
+WorkingDirectory=@INSTALL_ROOT@
+EnvironmentFile=/etc/polstation/vimbax.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-camera-preview --config /etc/polstation/config.yaml --interval 1
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polstation/state
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polstation-preview.target

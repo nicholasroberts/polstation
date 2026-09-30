@@ -1,0 +1,29 @@
+# Replace @INSTALL_ROOT@ with the absolute installed release path.
+[Unit]
+Description=Polstation read-only BME280 and EPEVER preview producer
+After=local-fs.target
+PartOf=polstation-preview.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=polstation
+Group=polstation
+SupplementaryGroups=i2c dialout
+WorkingDirectory=@INSTALL_ROOT@
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-sensor-preview --config /etc/polstation/config.yaml --interval 5
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polstation/state
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polstation-preview.target

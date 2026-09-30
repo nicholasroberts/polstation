@@ -87,4 +87,12 @@ successful sample from the other.
 `FilePreviewSource` merges this latest-value file into the existing read-only
 dashboard response and calculates sample ages. The browser and HTTP handler never
 import the hardware drivers or open either device. Production sampling schedules,
-validation, observation storage, retries, and services remain future work.
+validation, observation storage, retry policy, and integration into scientific
+acquisition remain future work.
+
+The diagnostic deployment keeps the camera producer, sensor producer, and
+loopback dashboard in three systemd services grouped by
+`polstation-preview.target`. Stopping the target propagates a clean stop to each
+process; an individual failure is restarted without coupling the other services.
+Only the producers may write bounded runtime state, and only the sensor producer
+receives the `i2c` and `dialout` supplementary groups.

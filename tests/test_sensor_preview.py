@@ -74,6 +74,7 @@ class SensorPreviewTests(unittest.TestCase):
             snapshot = json.loads(path.read_text())
             self.assertEqual(snapshot["mode"], "hardware-sensors")
             self.assertEqual(set(snapshot["sensors"]), {"bme280", "epever"})
+            self.assertFalse(Path(config["storage"]["data_root"]).exists())
 
 
 if __name__ == "__main__":

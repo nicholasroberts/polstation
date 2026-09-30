@@ -153,7 +153,11 @@ producer writes observations.
 ## Repository and deployment
 
 Code lives under `src/polstation/`; `tests/` is hardware-independent.
-`deploy/systemd/` contains separate acquisition and dashboard service templates.
+`deploy/systemd/` contains separate camera-preview, sensor-preview and dashboard
+units plus a target that manages the diagnostic stack as one operator action.
+The units keep hardware access out of the web process, restart failed processes,
+and preserve the dashboard's loopback-only binding. They are distinct from the
+future scientific acquisition service.
 
 - [Architecture](docs/architecture.md)
 - [Data and provenance](docs/data-format.md)

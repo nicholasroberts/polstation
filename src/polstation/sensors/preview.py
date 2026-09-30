@@ -10,7 +10,7 @@ import time
 
 from polstation.config import load_config
 from polstation.logging.setup import configure
-from polstation.storage.layout import prepare
+from polstation.storage.layout import prepare_state
 from polstation.storage.manifests import write_json
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def sensor_snapshot(config, samplers=None):
 
 
 def run_sensor_preview(config, stop, *, interval=5.0, samplers=None):
-    prepare(config)
+    prepare_state(config)
     output = Path(config["storage"]["state_root"]) / "sensor-preview.json"
     while not stop.is_set():
         cycle_started = time.monotonic()

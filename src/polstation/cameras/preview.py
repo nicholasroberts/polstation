@@ -14,7 +14,7 @@ import time
 from polstation.config import load_config
 from polstation.logging.setup import configure
 from polstation.polarization.preview import encode_png, legend_rgb, polarization_rgb, sample_mono8
-from polstation.storage.layout import prepare
+from polstation.storage.layout import prepare_state
 from polstation.storage.manifests import write_json
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
     except ImportError as error:
         raise RuntimeError("VmbPy is required for hardware preview mode") from error
 
-    prepare(config)
+    prepare_state(config)
     output = Path(config["storage"]["state_root"]) / "camera-previews.json"
     counters = {}
     with VmbSystem.get_instance() as vmb:

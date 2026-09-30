@@ -1,7 +1,8 @@
 # Replace @INSTALL_ROOT@ with the absolute installed checkout path.
 [Unit]
-Description=Polstation dashboard (scaffold)
+Description=Polstation diagnostic hardware-preview dashboard
 After=local-fs.target
+PartOf=polstation-preview.target
 StartLimitIntervalSec=0
 
 [Service]
@@ -9,7 +10,7 @@ Type=simple
 User=polstation
 Group=polstation
 WorkingDirectory=@INSTALL_ROOT@
-ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-dashboard --config /etc/polstation/config.yaml
+ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-dashboard --config /etc/polstation/config.yaml --hardware-preview
 Restart=always
 RestartSec=10
 TimeoutStopSec=30
@@ -20,8 +21,9 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/var/lib/polstation
+PrivateDevices=true
 StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=polstation-preview.target

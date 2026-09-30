@@ -60,8 +60,11 @@ sudo apt-get update
 sudo apt-get install git python3-venv
 sudo useradd --system --user-group --home-dir /var/lib/polstation --shell /usr/sbin/nologin polstation
 sudo install -d -o polstation -g polstation -m 0750 /var/lib/polstation
+sudo install -d -o polstation -g polstation -m 0750 /var/lib/polstation/data
+sudo install -d -o polstation -g polstation -m 0750 /var/lib/polstation/state
 sudo install -d -o root -g polstation -m 0750 /etc/polstation
-sudo install -d -o "$USER" -g "$(id -gn)" /opt/polstation/releases
+sudo install -d -o "$USER" -g "$(id -gn)" /opt/polstation
+install -d /opt/polstation/releases
 git clone git@github.com:nicholasroberts/polstation.git /opt/polstation/repository
 ```
 
@@ -79,52 +82,80 @@ git -C /opt/polstation/repository fetch origin --tags
 git -C /opt/polstation/repository worktree add --detach /opt/polstation/releases/v0.1.0 v0.1.0
 cd /opt/polstation/releases/v0.1.0
 python3 -m venv .venv
-.venv/bin/python -m pip install .
+.venv/bin/python -m pip install '.[sensor-preview]'
+.venv/bin/python -m pip install /opt/alliedvision/VimbaX_2026-2/api/python/vmbpy-1.2.2-py3-none-manylinux_2_27_aarch64.whl
 .venv/bin/python -m unittest discover -s tests -v
 git rev-parse HEAD
 ```
+
+The proprietary VmbPy wheel and GenTL path above are the versions commissioned
+on this Pi. Verify both paths whenever Vimba X changes; do not silently substitute
+a different SDK release.
 
 For the first install only, copy the field template:
 
 ```sh
 sudo install -o root -g polstation -m 0640 config/example_field_config.yaml /etc/polstation/config.yaml
+sudo install -o root -g polstation -m 0640 deploy/systemd/polstation-vimbax.env.example /etc/polstation/vimbax.env
 sudoedit /etc/polstation/config.yaml
+sudoedit /etc/polstation/vimbax.env
 ```
 
 Set `provenance.git_commit` to the full SHA printed above, `release_tag` to the
-selected tag, and `calibration_id` when commissioned. Leave unverified hardware
-parameters null. For updates, back up the existing configuration and edit it
-rather than replacing it with a fresh template. Record which config backup
-belongs to the preceding release for rollback.
+selected tag, and `calibration_id` when commissioned. Copy only the verified
+camera IDs/angles, BME280 bus/address and stable EPEVER `/dev/serial/by-id/`
+settings from the ignored commissioning configuration. Keep `data_root` and
+`state_root` under `/var/lib/polstation`. For updates, back up the existing
+configuration and edit it rather than replacing it with a fresh template. Record
+which config backup belongs to the preceding release for rollback.
 
 ```sh
 sudo -u polstation /opt/polstation/releases/v0.1.0/.venv/bin/polstation-check-config --config /etc/polstation/config.yaml
 ```
 
-## 4. Activate and verify
+## 4. Activate and verify the diagnostic preview stack
 
-For updates, stop both services before changing the active link. On first install,
-there are no services to stop. Preserve the previous link target (`readlink
-/opt/polstation/current`) and configuration before activation.
+For updates, stop the preview target before changing the active link. On first
+install, there are no preview services to stop. Preserve the previous link target
+(`readlink /opt/polstation/current`) and configuration before activation.
 
 ```sh
 # Updates only:
-sudo systemctl stop polstation-acquisition polstation-dashboard
+sudo systemctl stop polstation-preview.target
 # First install and updates:
 sudo ln -sfn /opt/polstation/releases/v0.1.0 /opt/polstation/current
-sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' deploy/systemd/polstation-acquisition.service.in | sudo tee /etc/systemd/system/polstation-acquisition.service >/dev/null
-sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' deploy/systemd/polstation-dashboard.service.in | sudo tee /etc/systemd/system/polstation-dashboard.service >/dev/null
-sudo systemd-analyze verify /etc/systemd/system/polstation-acquisition.service /etc/systemd/system/polstation-dashboard.service
+for name in camera-preview sensor-preview dashboard; do
+    sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' \
+        "deploy/systemd/polstation-${name}.service.in" \
+        | sudo tee "/etc/systemd/system/polstation-${name}.service" >/dev/null
+done
+sudo install -o root -g root -m 0644 \
+    deploy/systemd/polstation-preview.target \
+    /etc/systemd/system/polstation-preview.target
+sudo systemd-analyze verify \
+    /etc/systemd/system/polstation-camera-preview.service \
+    /etc/systemd/system/polstation-sensor-preview.service \
+    /etc/systemd/system/polstation-dashboard.service \
+    /etc/systemd/system/polstation-preview.target
 sudo systemctl daemon-reload
-sudo systemctl enable --now polstation-acquisition polstation-dashboard
-sudo systemctl status polstation-acquisition polstation-dashboard
-sudo journalctl -u polstation-acquisition -n 50 --no-pager
+sudo systemctl enable --now polstation-preview.target
+sudo systemctl status \
+    polstation-camera-preview \
+    polstation-sensor-preview \
+    polstation-dashboard
+sudo journalctl \
+    -u polstation-camera-preview \
+    -u polstation-sensor-preview \
+    -u polstation-dashboard \
+    -n 100 --no-pager
 ```
 
-The acquisition unit can write `/var/lib/polstation`; the dashboard filesystem is
-read-only. The service account should not own or modify release code. No hardware
-groups are granted yet because no drivers run. Review device access when adding
-I2C and serial drivers.
+The two producers can write only the replaceable state directory; the dashboard
+has read-only access. `SupplementaryGroups=i2c dialout` grants the sensor producer
+the permissions already verified during commissioning. Only the camera producer
+loads `/etc/polstation/vimbax.env`. The service account does not own or modify
+release code. This target runs diagnostics only and does not enable the scaffold
+acquisition service or record observations.
 
 ## 5. View the dashboard from the laptop
 
@@ -139,11 +170,12 @@ protection. Do not expose the scaffold HTTP server directly to the network.
 
 ## Rollback
 
-Stop both services, restore the preceding release's configuration (including its
-provenance), and change `/opt/polstation/current` back to its recorded release
-directory using `sudo ln -sfn`. If unit templates changed, restore the preceding
-units and run `sudo systemctl daemon-reload`. Restart both services and verify
-the reported commit and health. Retain prior release directories and venvs.
+Stop `polstation-preview.target`, restore the preceding release's configuration
+(including its provenance), and change `/opt/polstation/current` back to its
+recorded release directory using `sudo ln -sfn`. If unit templates changed,
+restore the preceding units and run `sudo systemctl daemon-reload`. Restart the
+target and verify the reported commit and health. Retain prior release directories
+and venvs.
 Scientific data stays under `/var/lib/polstation/data` throughout; do not run
 `git clean` or data deletion as part of deployment. Future data/config schema
 changes must have a migration and rollback plan before release.
@@ -153,7 +185,7 @@ changes must have a migration and rollback plan before release.
 The planned service path is laptop → external panel RJ45 → TSW101 network,
 with the Raspberry Pi 5 and all three Mako cameras on that network. No desktop,
 monitor, X11 forwarding or VNC is needed on the Pi. Closing the SSH session or
-browser leaves the systemd acquisition service running.
+browser leaves the systemd-managed preview producers running.
 
 Commission a private static subnet so service access does not require DHCP.
 An example only is Pi `192.168.50.10/24`, cameras `.21`–`.23`, and laptop
