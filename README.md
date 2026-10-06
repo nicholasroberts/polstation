@@ -11,6 +11,10 @@ Planned hardware: three Allied Vision Mako G-223B PoE cameras, a BME280 over I2C
 and an EPEVER Tracer 2210AN over USB-RS485/Modbus RTU. Camera serials, polarizer
 angles, triggering, calibration, and bus parameters require commissioning.
 
+For the commissioned lab system, start here:
+
+- [Power on and open the dashboard](docs/quickstart.md)
+
 ## Local development
 
 Python 3.11 or later:
@@ -160,11 +164,13 @@ and preserve the dashboard's loopback-only binding. They are distinct from the
 future scientific acquisition service.
 
 - [Architecture](docs/architecture.md)
+- [Lab dashboard quickstart](docs/quickstart.md)
 - [Data and provenance](docs/data-format.md)
 - [Calibration](docs/calibration.md)
 - [First SSH and Vimba X camera bring-up](docs/first-boot.md)
 - [2026-09-28 Pi/Vimba X commissioning record](docs/commissioning/2026-09-28-pi5-vimbax-camera-bring-up.md)
 - [2026-09-30 BME280 and EPEVER communications record](docs/commissioning/2026-09-30-environment-and-mppt-comms.md)
+- [2026-09-30 persistent preview-services record](docs/commissioning/2026-09-30-systemd-preview-services.md)
 - [Local → GitHub → Pi workflow](docs/deployment.md)
 - [Operations and recovery](docs/operations.md)
 

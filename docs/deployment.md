@@ -124,6 +124,14 @@ install, there are no preview services to stop. Preserve the previous link targe
 sudo systemctl stop polstation-preview.target
 # First install and updates:
 sudo ln -sfn /opt/polstation/releases/v0.1.0 /opt/polstation/current
+
+# Commissioned 192.168.2.0/24 + camera link-local lab network only:
+sudo install -o root -g root -m 0755 \
+    deploy/networkmanager/90-polstation-camera-address \
+    /etc/NetworkManager/dispatcher.d/90-polstation-camera-address
+sudo /etc/NetworkManager/dispatcher.d/90-polstation-camera-address \
+    eth0 dhcp4-change
+
 for name in camera-preview sensor-preview dashboard; do
     sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' \
         "deploy/systemd/polstation-${name}.service.in" \
@@ -157,16 +165,31 @@ loads `/etc/polstation/vimbax.env`. The service account does not own or modify
 release code. This target runs diagnostics only and does not enable the scaffold
 acquisition service or record observations.
 
+The NetworkManager hook above is specific to the commissioned temporary lab
+addressing described in the [Pi/Vimba X bring-up record](commissioning/2026-09-28-pi5-vimbax-camera-bring-up.md).
+It keeps the DHCP service address ahead of `169.254.68.1/16`, as required by the
+tested Vimba X discovery behavior. Do not install it on a differently addressed
+field network without reviewing the interface and subnet values.
+
 ## 5. View the dashboard from the laptop
 
 Run this on your laptop and keep the tunnel open:
 
 ```sh
-ssh -N -L 8080:127.0.0.1:8000 pi@<Pi-address>
+ssh \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -N \
+  -L 127.0.0.1:8080:127.0.0.1:8000 \
+  pi@<Pi-address>
 ```
 
-Replace `<Pi-address>` with the commissioned Pi address. Open http://localhost:8080 on the laptop. SSH provides authentication and transport
-protection. Do not expose the scaffold HTTP server directly to the network.
+Replace `<Pi-address>` with the commissioned Pi address. A successful command
+remains silent and must stay running. Open <http://127.0.0.1:8080/> on the laptop.
+SSH provides authentication and transport protection. Do not expose the
+dashboard HTTP server directly to the network. The commissioned lab procedure
+and troubleshooting checks are in the [quickstart](quickstart.md).
 
 ## Rollback
 

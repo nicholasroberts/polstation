@@ -2,8 +2,8 @@
 
 Date: 2026-09-30  
 Platform: Raspberry Pi 5, Debian 13 (arm64)  
-Status: read-only communications and the diagnostic dashboard path verified on
-the Pi; not yet a persistent service or scientific observation path
+Status: read-only communications, diagnostic dashboard path, and persistent
+systemd deployment verified on the Pi; not a scientific observation path
 
 This session established communication with the installed BME280 environmental
 sensor and EPEVER Tracer 2210AN MPPT controller. It did not calibrate either
@@ -97,9 +97,9 @@ battery, load, energy, temperature, charging, and controller-status values.
 The tunnel was closed independently, after which all three Pi processes were
 stopped cleanly with `SIGINT`.
 
-This verified the diagnostic data path and process separation only. The processes
-were launched from an interactive shell, not systemd; the values were neither
-recorded as observations nor independently calibrated.
+This verified the diagnostic data path and process separation only. The values
+were neither recorded as observations nor independently calibrated. Persistent
+service commissioning is recorded separately in the systemd preview record.
 
 ## Local configuration retained
 
@@ -118,8 +118,6 @@ temperature sensor as zero.
 ## Remaining work
 
 - Promote the diagnostic adapters into the future observation acquisition design.
-- Add and verify separate persistent systemd services for camera preview, sensor
-  preview, and the loopback dashboard.
 - Record sampling time, read duration, register source, units, and validity.
 - Decide polling intervals and retry behavior, then test disconnect/reconnect.
 - Validate BME280 readings against suitable references and its installed thermal environment.

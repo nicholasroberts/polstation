@@ -1,0 +1,24 @@
+#!/bin/sh
+
+# Keep the laptop-facing DHCP address ahead of the camera-side link-local
+# address. Vimba X 2026-2 otherwise sends discovery from the DHCP address but
+# rejects valid replies from link-local cameras.
+
+[ "$1" = "eth0" ] || exit 0
+
+case "$2" in
+    up|dhcp4-change)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+# An "up" event may arrive before DHCP. Wait for an address outside
+# 169.254.0.0/16; the later dhcp4-change event will invoke us again.
+if /usr/sbin/ip -4 -o address show dev eth0 \
+    | /usr/bin/grep -v -q ' inet 169\.254\.'
+then
+    /usr/sbin/ip address delete 169.254.68.1/16 dev eth0 2>/dev/null || true
+    /usr/sbin/ip address add 169.254.68.1/16 dev eth0
+fi

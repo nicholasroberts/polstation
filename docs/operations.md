@@ -1,5 +1,9 @@
 # Operations
 
+For the normal laptop connection and dashboard procedure, use the
+[lab quickstart](quickstart.md). The commands below are service diagnostics and
+recovery operations on the Pi.
+
 ```sh
 sudo systemctl status polstation-preview.target
 sudo systemctl status polstation-camera-preview polstation-sensor-preview polstation-dashboard
