@@ -162,11 +162,20 @@ acquisition service or record observations.
 Run this on your laptop and keep the tunnel open:
 
 ```sh
-ssh -N -L 8080:127.0.0.1:8000 pi@<Pi-address>
+ssh \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -N \
+  -L 127.0.0.1:8080:127.0.0.1:8000 \
+  pi@<Pi-address>
 ```
 
-Replace `<Pi-address>` with the commissioned Pi address. Open http://localhost:8080 on the laptop. SSH provides authentication and transport
-protection. Do not expose the scaffold HTTP server directly to the network.
+Replace `<Pi-address>` with the commissioned Pi address. A successful command
+remains silent and must stay running. Open <http://127.0.0.1:8080/> on the laptop.
+SSH provides authentication and transport protection. Do not expose the
+dashboard HTTP server directly to the network. The commissioned lab procedure
+and troubleshooting checks are in the [quickstart](quickstart.md).
 
 ## Rollback
 
