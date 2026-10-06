@@ -1,8 +1,7 @@
 # Replace @INSTALL_ROOT@ with the absolute installed release path.
 [Unit]
 Description=Polstation Vimba X camera preview producer
-After=local-fs.target network-online.target
-Wants=network-online.target
+After=local-fs.target network.target
 PartOf=polstation-preview.target
 StartLimitIntervalSec=0
 

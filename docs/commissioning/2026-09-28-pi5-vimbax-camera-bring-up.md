@@ -60,20 +60,39 @@ though packet capture showed all three responses. The working boot sequence is:
 
 1. Keep `Wired connection 1` at `ipv4.method auto`, without the secondary
    address in the connection profile.
-2. Add `169.254.68.1/16` after the connection reaches `up` using
+2. Add `169.254.68.1/16` after DHCP has installed the service address using
    `/etc/NetworkManager/dispatcher.d/90-polstation-camera-address`:
 
 ```sh
 #!/bin/sh
 
-if [ "$1" = "eth0" ] && [ "$2" = "up" ]; then
-    /usr/sbin/ip address add 169.254.68.1/16 dev eth0 2>/dev/null || true
+[ "$1" = "eth0" ] || exit 0
+
+case "$2" in
+    up|dhcp4-change) ;;
+    *) exit 0 ;;
+esac
+
+if /usr/sbin/ip -4 -o address show dev eth0 \
+    | /usr/bin/grep -v -q ' inet 169\.254\.'
+then
+    /usr/sbin/ip address delete 169.254.68.1/16 dev eth0 2>/dev/null || true
+    /usr/sbin/ip address add 169.254.68.1/16 dev eth0
 fi
 ```
 
-The hook is mode 0755. After reboot, `ip -brief address show eth0` listed the
-DHCP address first and camera-side address second, and Vimba found all three
-cameras. This is a commissioning workaround, not the final field address plan.
+The tracked copy is
+`deploy/networkmanager/90-polstation-camera-address` and the installed hook is
+mode 0755. The `up` event can precede DHCP, so `dhcp4-change` must reorder the
+addresses after the lease appears. Verify that `ip -brief address show eth0`
+lists the DHCP address first and camera-side address second. This is a
+commissioning workaround, not the final field address plan.
+
+This ordering requirement was revalidated on 2026-10-06. Packet capture showed
+all three cameras replying to GigE Vision discovery and all three answered ping,
+but Vimba reported zero cameras while `169.254.68.1/16` appeared first. Deleting
+and re-adding that address restored immediate discovery and all three live
+preview streams.
 
 ## Vimba X installation
 

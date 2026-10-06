@@ -6,6 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD = ROOT / "deploy/systemd"
+NETWORKMANAGER = ROOT / "deploy/networkmanager"
 
 
 class DeploymentTests(unittest.TestCase):
@@ -52,6 +53,24 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn("SupplementaryGroups", dashboard)
         self.assertIn("--hardware-preview", dashboard)
         self.assertIn("PrivateDevices=true", dashboard)
+
+    def test_preview_stack_does_not_block_on_external_network(self):
+        target = self.read("polstation-preview.target")
+        camera = self.read("polstation-camera-preview.service.in")
+        self.assertNotIn("network-online.target", target)
+        self.assertNotIn("network-online.target", camera)
+        self.assertIn("After=local-fs.target network.target", camera)
+
+    def test_camera_address_hook_reorders_after_dhcp(self):
+        hook = (
+            NETWORKMANAGER / "90-polstation-camera-address"
+        ).read_text()
+        self.assertIn("up|dhcp4-change", hook)
+        self.assertIn("grep -v -q ' inet 169\\.254\\.'", hook)
+        self.assertLess(
+            hook.index("address delete 169.254.68.1/16"),
+            hook.index("address add 169.254.68.1/16"),
+        )
 
 
 if __name__ == "__main__":

@@ -6,8 +6,11 @@ the camera, sensor, or dashboard commands.
 
 ## 1. Connect and power the system
 
-Connect the laptop to the instrument Ethernet network, power the PoE switch and
-Pi, and allow roughly 60–90 seconds for boot and camera discovery. The
+On the Mac, enable Internet Sharing to the USB Ethernet adapter used by the
+instrument. Connect the laptop to TSW101 port 5, power the PoE switch and Pi,
+and allow roughly 60–90 seconds for boot and camera discovery. If the Pi was
+already powered before Internet Sharing was enabled, unplug and reconnect the
+Mac Ethernet adapter or toggle Internet Sharing off and on once. The
 commissioned laptop/Pi service addresses are:
 
 - laptop-side network: `192.168.2.1/24`;
@@ -42,8 +45,14 @@ ssh admin@192.168.2.2 \
   'systemctl is-active polstation-preview.target polstation-camera-preview.service polstation-sensor-preview.service polstation-dashboard.service; systemctl --failed --no-pager; ss -ltn | grep ":8000"'
 ```
 
-Expect four `active` lines, zero failed units, and a listener on
-`127.0.0.1:8000`. The services run independently of SSH and the browser.
+Expect four `active` lines and a listener on `127.0.0.1:8000`. Normally there
+are zero failed units. The services run independently of SSH and the browser.
+
+On the currently deployed release,
+`NetworkManager-wait-online.service` can be failed if the Pi booted before the
+Mac supplied DHCP. That does not by itself mean the Polstation services or
+dashboard have failed; use the four explicit service states and port check
+above. The next release removes this unnecessary boot dependency.
 
 ## 4. Open the SSH tunnel
 
@@ -116,6 +125,34 @@ ssh -t admin@192.168.2.2 \
 
 Persistent failures should remain visible rather than being hidden by repeated
 manual restarts. Save the journal output for diagnosis.
+
+### The dashboard works but all cameras are absent
+
+First confirm that the camera producer reports `expected three cameras, found
+0`, then stop it before running the Vimba diagnostic executable:
+
+```sh
+ssh admin@192.168.2.2
+sudo systemctl stop polstation-camera-preview.service
+ip -brief address show eth0
+/opt/alliedvision/VimbaX_2026-2/bin/ListCameras_VmbC
+```
+
+For the commissioned dual-address arrangement, `eth0` must list
+`192.168.2.2/24` before `169.254.68.1/16`. If it lists them in the opposite
+order, restore the tested ordering and retry discovery:
+
+```sh
+sudo ip address delete 169.254.68.1/16 dev eth0
+sudo ip address add 169.254.68.1/16 dev eth0
+ip -brief address show eth0
+/opt/alliedvision/VimbaX_2026-2/bin/ListCameras_VmbC
+sudo systemctl start polstation-camera-preview.service
+```
+
+Green switch-port lights establish power and Ethernet link only. In the 2026-10-06
+test, all three cameras answered ping and GigE Vision discovery, but Vimba X
+reported zero cameras until the IPv4 addresses were reordered.
 
 ## Shut down safely
 
