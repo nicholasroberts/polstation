@@ -55,6 +55,9 @@ three diagnostic plots: central-ROI median response with fitted straight lines,
 residuals from those fits, and grouped boxplots of the central-ROI pixel
 distribution. The camera order alternates between repeats to reduce monotonic
 source-drift bias, but acquisition remains sequential and is labelled as such.
+An incomplete GigE frame is rejected and retried up to three times. Successful
+manifests record every rejected attempt and the attempt number of each retained
+frame; exhaustion of the bounded retry still fails the capture explicitly.
 
 The default ROI exactly reproduces the reviewed earlier program: a circle at
 50% image width, 50% image height, with radius 60% of half the smaller image

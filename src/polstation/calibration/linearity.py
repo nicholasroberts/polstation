@@ -22,6 +22,7 @@ DEFAULT_ROI_RADIUS_PERCENT = 60.0
 MIN_ROI_PIXELS = 1000
 MAX_FIT_MEAN_DN = 0.90 * 4095
 MAX_FIT_SATURATION_FRACTION = 0.001
+MAX_FRAME_ATTEMPTS = 3
 
 
 def linear_fit(points):
@@ -79,6 +80,37 @@ def _set_and_remember(camera, name, value, restorations):
     feature = _feature(camera, name)
     restorations.append((camera.get_id(), name, feature, feature.get()))
     feature.set(value)
+
+
+def _get_complete_frame(camera, timeout_ms, complete_status, rejected_frames, *,
+                        exposure_us, phase, repeat=None,
+                        max_attempts=MAX_FRAME_ATTEMPTS):
+    """Return a complete frame, recording bounded retries of incomplete frames."""
+    camera_id = camera.get_id()
+    last_status = None
+    for attempt in range(1, max_attempts + 1):
+        frame = camera.get_frame(timeout_ms=timeout_ms)
+        last_status = frame.get_status()
+        if last_status == complete_status:
+            return frame, attempt
+        rejected_frames.append({
+            "camera_id": camera_id,
+            "exposure_requested_us": exposure_us,
+            "phase": phase,
+            "repeat": repeat,
+            "attempt": attempt,
+            "status": str(last_status),
+            "rejected_at_utc": datetime.now(timezone.utc).isoformat(),
+        })
+        print(
+            f"Retrying {camera_id} at {exposure_us:.0f} us after "
+            f"{last_status} (attempt {attempt}/{max_attempts})",
+            flush=True,
+        )
+    raise RuntimeError(
+        f"{camera_id}: no complete frame after {max_attempts} attempts; "
+        f"last status {last_status}"
+    )
 
 
 def _circular_roi_mask(width, height, numpy, *, center_x_percent,
@@ -283,6 +315,7 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
     raw_directory.mkdir()
     started = datetime.now(timezone.utc)
     frame_records = []
+    rejected_frames = []
     summaries = []
     settings = {}
     roi_masks = {}
@@ -330,7 +363,12 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
                             _feature(camera, "ExposureTimeAbs").set(exposure_us)
                         # Discard one frame after every exposure change.
                         for camera in cameras:
-                            camera.get_frame(timeout_ms=max(5000, int(exposure_ms * 4 + 2000)))
+                            timeout_ms = max(5000, int(exposure_ms * 4 + 2000))
+                            _get_complete_frame(
+                                camera, timeout_ms, FrameStatus.Complete,
+                                rejected_frames, exposure_us=exposure_us,
+                                phase="settling",
+                            )
 
                         values = {camera.get_id(): [] for camera in cameras}
                         image_sums = {}
@@ -338,10 +376,13 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
                             order = cameras if repeat % 2 == 0 else list(reversed(cameras))
                             for camera in order:
                                 camera_id = camera.get_id()
-                                frame = camera.get_frame(timeout_ms=max(5000, int(exposure_ms * 4 + 2000)))
+                                timeout_ms = max(5000, int(exposure_ms * 4 + 2000))
+                                frame, capture_attempt = _get_complete_frame(
+                                    camera, timeout_ms, FrameStatus.Complete,
+                                    rejected_frames, exposure_us=exposure_us,
+                                    phase="recorded", repeat=repeat,
+                                )
                                 captured_at = datetime.now(timezone.utc).isoformat()
-                                if frame.get_status() != FrameStatus.Complete:
-                                    raise RuntimeError(f"{camera_id}: incomplete frame {frame.get_status()}")
                                 raw = bytes(frame.get_buffer())
                                 width, height = frame.get_width(), frame.get_height()
                                 if camera_id not in roi_masks:
@@ -372,6 +413,7 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
                                     "captured_at_utc": captured_at,
                                     "device_timestamp": frame.get_timestamp(),
                                     "frame_id": frame.get_id(),
+                                    "capture_attempt": capture_attempt,
                                     "device_temperature_c": _read_feature(camera, "DeviceTemperature"),
                                     "width": width,
                                     "height": height,
@@ -462,6 +504,7 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
             "frames_per_point": frames_per_point,
             "camera_settings": settings,
             "frames": frame_records,
+            "rejected_frames": rejected_frames,
             "products": {},
         }
         manifest["roi"] = {
