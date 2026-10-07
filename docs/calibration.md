@@ -46,6 +46,53 @@ future dataset and retain the assets for reproducibility.
 Commissioning must establish dark/flat corrections, camera response, optical
 alignment, polarizer orientations and timing error before deriving polarization.
 
+## Camera-linearity scouting capture
+
+`polstation-camera-linearity` acquires a controlled Mono12 exposure sweep from
+the three configured cameras. It writes every original frame buffer used by the
+calculation, a CSV summary, a completion manifest with hashes and settings, and
+three diagnostic plots: central-ROI median response with fitted straight lines,
+residuals from those fits, and grouped boxplots of the central-ROI pixel
+distribution. The camera order alternates between repeats to reduce monotonic
+source-drift bias, but acquisition remains sequential and is labelled as such.
+
+The default ROI exactly reproduces the reviewed earlier program: a circle at
+50% image width, 50% image height, with radius 60% of half the smaller image
+dimension. This is the primary scientific region for the fisheye images. The
+outside-ROI median is retained and plotted as a dynamic-baseline diagnostic,
+and the CSV includes ROI median minus outside median. The outside value is not
+automatically subtracted because that interpretation still requires validation.
+Each box represents the pixel distribution in the mean image for one camera and
+exposure: 25th–75th percentiles, median, and 5th–95th percentile whiskers.
+
+The scout fits `raw ROI median = intercept + slope * exposure`; it does not
+claim that the intercept is a validated dark correction. Points whose ROI median
+exceeds 90% of the 12-bit range or for which any captured frame has more than
+0.1% saturated ROI pixels are shown but excluded from fitting. An independently
+acquired exposure- and temperature-aware dark library is still required before
+producing calibration gains.
+
+Install the optional analysis dependencies into a dedicated calibration
+environment, stop the preview producer so it releases the cameras, and write to
+a new directory outside Git:
+
+```sh
+python -m pip install -e '.[calibration]'
+sudo systemctl stop polstation-camera-preview.service
+polstation-camera-linearity \
+  --config /etc/polstation/config.yaml \
+  --output "$HOME/polstation-calibration/linearity-YYYYMMDD-HHMMSS" \
+  --exposures-ms 1 2 5 10 15 25 40 60 100 \
+  --frames 5 \
+  --source-note 'Verified unpolarized five-diffuser source; record control-polarizer relative angle here'
+sudo systemctl start polstation-camera-preview.service
+```
+
+An output directory without `manifest.json` is an incomplete capture and must be
+retained and investigated rather than treated as calibration data. Raw `.raw`
+files are little-endian Mono12 samples stored in 16-bit words at the dimensions
+recorded per frame. Large calibration captures remain outside Git.
+
 ## Earlier Ubuntu workflow
 
 See [the legacy calibration review](legacy-calibration-review.md) for the
