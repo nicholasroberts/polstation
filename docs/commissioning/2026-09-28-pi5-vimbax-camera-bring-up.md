@@ -53,6 +53,13 @@ distinct IPv4 link-local addresses in `169.254.0.0/16`. The Pi therefore also
 uses `169.254.68.1/16` on `eth0`. No DHCP server was installed on the Pi and no
 persistent camera addresses were assigned.
 
+On 2026-10-06, a later boot did not receive an IPv4 lease from Mac Internet
+Sharing: `eth0` showed `169.254.68.1/16` and IPv6 addresses only. The assumed
+`192.168.2.2` connection failed, while `ssh admin@polstation.local` succeeded
+through mDNS (using IPv6). Consequently, the lab quickstart uses
+`polstation.local` as the canonical service endpoint and treats a DHCP IPv4
+address as session-specific and optional.
+
 Vimba discovery on this tested host selected the last IPv4 address listed for
 `eth0`. When NetworkManager installed the link-local address before DHCP, Vimba
 sent discovery from `192.168.2.2` and ignored the link-local camera replies even
