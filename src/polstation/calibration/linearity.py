@@ -84,12 +84,31 @@ def _set_and_remember(camera, name, value, restorations):
 
 def _get_complete_frame(camera, timeout_ms, complete_status, rejected_frames, *,
                         exposure_us, phase, repeat=None,
-                        max_attempts=MAX_FRAME_ATTEMPTS):
+                        max_attempts=MAX_FRAME_ATTEMPTS,
+                        retryable_exceptions=()):
     """Return a complete frame, recording bounded retries of incomplete frames."""
     camera_id = camera.get_id()
     last_status = None
     for attempt in range(1, max_attempts + 1):
-        frame = camera.get_frame(timeout_ms=timeout_ms)
+        try:
+            frame = camera.get_frame(timeout_ms=timeout_ms)
+        except retryable_exceptions as error:
+            last_status = f"{type(error).__name__}: {error}"
+            rejected_frames.append({
+                "camera_id": camera_id,
+                "exposure_requested_us": exposure_us,
+                "phase": phase,
+                "repeat": repeat,
+                "attempt": attempt,
+                "status": last_status,
+                "rejected_at_utc": datetime.now(timezone.utc).isoformat(),
+            })
+            print(
+                f"Retrying {camera_id} at {exposure_us:.0f} us after "
+                f"{last_status} (attempt {attempt}/{max_attempts})",
+                flush=True,
+            )
+            continue
         last_status = frame.get_status()
         if last_status == complete_status:
             return frame, attempt
@@ -303,7 +322,7 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
             roi_radius_percent=DEFAULT_ROI_RADIUS_PERCENT):
     try:
         import numpy
-        from vmbpy import FrameStatus, PixelFormat, VmbSystem
+        from vmbpy import FrameStatus, PixelFormat, VmbSystem, VmbTimeout
     except ImportError as error:
         raise RuntimeError(
             "Install the calibration extra and VmbPy before capture"
@@ -368,6 +387,7 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
                                 camera, timeout_ms, FrameStatus.Complete,
                                 rejected_frames, exposure_us=exposure_us,
                                 phase="settling",
+                                retryable_exceptions=(VmbTimeout,),
                             )
 
                         values = {camera.get_id(): [] for camera in cameras}
@@ -381,6 +401,7 @@ def capture(config, output, exposures_ms, frames_per_point, source_note, *,
                                     camera, timeout_ms, FrameStatus.Complete,
                                     rejected_frames, exposure_us=exposure_us,
                                     phase="recorded", repeat=repeat,
+                                    retryable_exceptions=(VmbTimeout,),
                                 )
                                 captured_at = datetime.now(timezone.utc).isoformat()
                                 raw = bytes(frame.get_buffer())

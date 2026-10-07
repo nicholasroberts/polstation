@@ -69,6 +69,39 @@ class LinearityTests(unittest.TestCase):
             )
         self.assertEqual(len(rejected), 3)
 
+    def test_timeout_is_retried_and_recorded(self):
+        class RetryableTimeout(Exception):
+            pass
+
+        class Frame:
+            def get_status(self):
+                return "complete"
+
+        class Camera:
+            def __init__(self):
+                self.calls = 0
+
+            def get_id(self):
+                return "camera-1"
+
+            def get_frame(self, timeout_ms):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RetryableTimeout("transient timeout")
+                return Frame()
+
+        rejected = []
+        frame, attempt = _get_complete_frame(
+            Camera(), 5000, "complete", rejected,
+            exposure_us=900000, phase="recorded", repeat=2,
+            retryable_exceptions=(RetryableTimeout,),
+        )
+        self.assertEqual(frame.get_status(), "complete")
+        self.assertEqual(attempt, 2)
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("RetryableTimeout", rejected[0]["status"])
+        self.assertIn("transient timeout", rejected[0]["status"])
+
     def test_linear_fit_includes_black_level_intercept(self):
         fit = linear_fit([(1, 12), (2, 19), (4, 33), (8, 61)])
         self.assertAlmostEqual(fit["intercept_dn"], 5)
