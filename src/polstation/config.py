@@ -5,6 +5,18 @@ from pathlib import Path
 import yaml
 
 
+DEFAULT_CAMERA_PREVIEW = {
+    "exposure_mode": "shared_auto",
+    "initial_exposure_us": 15000,
+    "minimum_exposure_us": 100,
+    "maximum_exposure_us": 500000,
+    "brightness_percentile": 99,
+    "target_brightness_dn": 180,
+    "brightness_tolerance_dn": 10,
+    "maximum_step_factor": 2,
+}
+
+
 def positive(value, name):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a finite positive number")
@@ -34,6 +46,35 @@ def load_config(path):
         positive(config["acquisition"][name], name)
     if config["acquisition"]["retry_initial_seconds"] > config["acquisition"]["retry_max_seconds"]:
         raise ValueError("initial retry must not exceed maximum retry")
+    camera_preview = config.setdefault("camera_preview", DEFAULT_CAMERA_PREVIEW.copy())
+    if not isinstance(camera_preview, dict):
+        raise ValueError("camera_preview must be a mapping")
+    missing_preview = set(DEFAULT_CAMERA_PREVIEW) - set(camera_preview)
+    if missing_preview:
+        raise ValueError(
+            "camera_preview is missing: " + ", ".join(sorted(missing_preview))
+        )
+    if camera_preview["exposure_mode"] not in ("fixed", "shared_auto"):
+        raise ValueError("camera preview exposure_mode must be fixed or shared_auto")
+    for name in (
+        "initial_exposure_us", "minimum_exposure_us", "maximum_exposure_us",
+        "brightness_percentile", "target_brightness_dn", "maximum_step_factor",
+    ):
+        positive(camera_preview[name], f"camera_preview.{name}")
+    tolerance = camera_preview["brightness_tolerance_dn"]
+    if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
+            or not math.isfinite(tolerance) or tolerance < 0):
+        raise ValueError("camera_preview.brightness_tolerance_dn must be finite and nonnegative")
+    if not camera_preview["minimum_exposure_us"] <= camera_preview["initial_exposure_us"] <= camera_preview["maximum_exposure_us"]:
+        raise ValueError("camera preview initial exposure must be within its limits")
+    if camera_preview["brightness_percentile"] > 100:
+        raise ValueError("camera preview brightness percentile must not exceed 100")
+    if camera_preview["target_brightness_dn"] > 255:
+        raise ValueError("camera preview target brightness must not exceed 255 DN")
+    if tolerance >= camera_preview["target_brightness_dn"]:
+        raise ValueError("camera preview brightness tolerance must be below its target")
+    if camera_preview["maximum_step_factor"] <= 1:
+        raise ValueError("camera preview maximum step factor must exceed one")
     positive(config["storage"]["minimum_free_bytes"], "minimum_free_bytes")
     positive(config["dashboard"]["stale_after_seconds"], "stale_after_seconds")
     if config["dashboard"]["host"] != "127.0.0.1":

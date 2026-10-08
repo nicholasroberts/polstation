@@ -23,7 +23,7 @@ observations occur. The health file can become stale when status writes fail.
 
 Still required for field operation: vendor-supported camera SDK operation on the
 target Pi, permanent network provisioning, measured synchronization, production
-acquisition, exposure control, scientific validation, hung-driver isolation,
+acquisition, scientifically validated exposure control, hung-driver isolation,
 watchdog integration,
 power-loss testing, storage endurance and capacity planning, backup monitoring,
 and long-duration soak testing. Restarting a crashed process does not detect all
@@ -69,6 +69,16 @@ that file through `FilePreviewSource`; the web process never imports VmbPy or
 opens a device. Old snapshots are marked stale using the configured dashboard
 threshold. This first implementation is for hardware evaluation, not the future
 scientific acquisition service or synchronized streaming.
+
+The diagnostic producer uses bounded shared auto-exposure by default. It measures
+the configured high percentile in each bounded Mono8 preview, takes the brightest
+of the three, and applies one identical next exposure to all cameras. Camera-local
+auto-exposure remains off because independently selected exposures would corrupt
+the three-analyser intensity ratios. The controller has explicit exposure limits,
+a target, tolerance and maximum per-cycle step in configuration. Its applied and
+next exposure, measured brightness and limits are published in the replaceable
+snapshot. This protects the diagnostic display from gross day/night exposure
+changes; it is not the validated exposure policy for scientific observations.
 
 Polarization processing remains in the producer, not the HTTP request handler.
 Only derived PNGs and explicit validity flags cross the atomic snapshot boundary.

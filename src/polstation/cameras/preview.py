@@ -74,6 +74,52 @@ def _read_feature(camera, *names):
     return None
 
 
+def _feature(camera, *names):
+    for name in names:
+        try:
+            return camera.get_feature_by_name(name)
+        except Exception:
+            pass
+    raise RuntimeError(f"camera {camera.get_id()} has none of features: {', '.join(names)}")
+
+
+def _percentile_dn(pixels, percentile):
+    """Return a nearest-rank percentile from bounded 8-bit preview pixels."""
+    if not pixels:
+        raise ValueError("cannot measure brightness from an empty preview")
+    histogram = [0] * 256
+    for value in pixels:
+        histogram[value] += 1
+    rank = max(1, int((percentile / 100) * len(pixels) + 0.999999999))
+    cumulative = 0
+    for value, count in enumerate(histogram):
+        cumulative += count
+        if cumulative >= rank:
+            return value
+    return 255
+
+
+def _next_shared_exposure(current_us, brightest_dn, settings):
+    """Choose one bounded next exposure for all cameras from the brightest preview."""
+    minimum = settings["minimum_exposure_us"]
+    maximum = settings["maximum_exposure_us"]
+    target = settings["target_brightness_dn"]
+    tolerance = settings["brightness_tolerance_dn"]
+    maximum_step = settings["maximum_step_factor"]
+    if abs(brightest_dn - target) <= tolerance:
+        return current_us
+    if brightest_dn <= 0:
+        factor = maximum_step
+    elif brightest_dn >= 255:
+        # A clipped percentile contains no information about how far over-range
+        # the scene is, so make one conservative bounded downward step.
+        factor = 1 / maximum_step
+    else:
+        factor = target / brightest_dn
+        factor = min(maximum_step, max(1 / maximum_step, factor))
+    return max(minimum, min(maximum, round(current_us * factor)))
+
+
 class FilePreviewSource:
     """Read the atomic latest-preview file without importing or opening Vimba."""
 
@@ -140,6 +186,9 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
 
     prepare_state(config)
     output = Path(config["storage"]["state_root"]) / "camera-previews.json"
+    exposure_settings = config["camera_preview"]
+    exposure_mode = exposure_settings["exposure_mode"]
+    shared_exposure_us = exposure_settings["initial_exposure_us"]
     counters = {}
     with VmbSystem.get_instance() as vmb:
         cameras = sorted(vmb.get_all_cameras(), key=lambda camera: camera.get_id())
@@ -152,11 +201,26 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                 for camera in opened:
                     packet = camera.get_feature_by_name("GevSCPSPacketSize")
                     trigger = camera.get_feature_by_name("TriggerMode")
-                    original = (camera, packet, packet.get(), camera.get_pixel_format(), trigger, trigger.get())
+                    exposure = _feature(camera, "ExposureTimeAbs", "ExposureTime")
+                    exposure_auto = _feature(camera, "ExposureAuto")
+                    original = {
+                        "camera": camera,
+                        "packet": packet,
+                        "packet_value": packet.get(),
+                        "pixel_format": camera.get_pixel_format(),
+                        "trigger": trigger,
+                        "trigger_value": trigger.get(),
+                        "exposure": exposure,
+                        "exposure_value": exposure.get(),
+                        "exposure_auto": exposure_auto,
+                        "exposure_auto_value": exposure_auto.get(),
+                    }
                     originals.append(original)
                     packet.set(1500)
                     camera.set_pixel_format(PixelFormat.Mono8)
                     trigger.set("Off")
+                    exposure_auto.set("Off")
+                    exposure.set(shared_exposure_us)
 
                 while not stop.is_set():
                     cycle_started = time.monotonic()
@@ -189,21 +253,52 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                                               "captured_at_utc": None, "age_seconds": None, "exposure_us": None,
                                               "gain_db": None, "pixel_format": None, "device_timestamp": None,
                                               "preview_png": None, "error": str(error)})
+                    brightest_dn = None
+                    next_exposure_us = shared_exposure_us
+                    if len(sampled) == len(opened):
+                        brightest_dn = max(
+                            _percentile_dn(item[2], exposure_settings["brightness_percentile"])
+                            for item in sampled.values()
+                        )
+                        if exposure_mode == "shared_auto":
+                            next_exposure_us = _next_shared_exposure(
+                                shared_exposure_us, brightest_dn, exposure_settings
+                            )
                     write_json(output, {"schema_version": 1, "mode": "hardware-preview",
                                        "hardware_ready": all(item["state"] == "live" for item in snapshots),
                                        "recording": False, "synchronization": "unverified",
                                        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                                       "exposure_control": {
+                                           "mode": exposure_mode,
+                                           "shared": True,
+                                           "applied_exposure_us": shared_exposure_us,
+                                           "next_exposure_us": next_exposure_us,
+                                           "brightness_percentile": exposure_settings["brightness_percentile"],
+                                           "brightest_percentile_dn": brightest_dn,
+                                           "target_brightness_dn": exposure_settings["target_brightness_dn"],
+                                           "minimum_exposure_us": exposure_settings["minimum_exposure_us"],
+                                           "maximum_exposure_us": exposure_settings["maximum_exposure_us"],
+                                       },
                                        "polarization": _polarization_snapshot(config, sampled),
                                        "cameras": snapshots}, replace=True)
+                    if next_exposure_us != shared_exposure_us:
+                        for original in originals:
+                            original["exposure"].set(next_exposure_us)
+                        shared_exposure_us = next_exposure_us
                     stop.wait(max(0.0, interval - (time.monotonic() - cycle_started)))
             finally:
-                for camera, packet, packet_value, pixel_format, trigger, trigger_value in reversed(originals):
+                for original in reversed(originals):
                     try:
-                        trigger.set(trigger_value)
-                        camera.set_pixel_format(pixel_format)
-                        packet.set(packet_value)
+                        original["exposure"].set(original["exposure_value"])
+                        original["exposure_auto"].set(original["exposure_auto_value"])
+                        original["trigger"].set(original["trigger_value"])
+                        original["camera"].set_pixel_format(original["pixel_format"])
+                        original["packet"].set(original["packet_value"])
                     except Exception:
-                        logger.exception("Could not restore preview settings for %s", camera.get_id())
+                        logger.exception(
+                            "Could not restore preview settings for %s",
+                            original["camera"].get_id(),
+                        )
 
 
 def main():

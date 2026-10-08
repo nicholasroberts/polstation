@@ -10,7 +10,12 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from polstation.cameras.demo import DemoPreviewSource
-from polstation.cameras.preview import FilePreviewSource, mono8_preview_png
+from polstation.cameras.preview import (
+    FilePreviewSource,
+    _next_shared_exposure,
+    _percentile_dn,
+    mono8_preview_png,
+)
 from polstation.config import load_config
 from polstation.web.app import make_handler
 
@@ -89,6 +94,18 @@ class DemoTests(unittest.TestCase):
         image = mono8_preview_png(bytes(range(24)), 6, 4, max_width=3, max_height=2)
         self.assertEqual(image[:8], b'\x89PNG\r\n\x1a\n')
         self.assertEqual(struct.unpack('>II', image[16:24]), (3, 2))
+
+    def test_preview_brightness_percentile_uses_nearest_rank(self):
+        self.assertEqual(_percentile_dn(bytes([0, 10, 20, 255]), 50), 10)
+        self.assertEqual(_percentile_dn(bytes([0, 10, 20, 255]), 99), 255)
+
+    def test_shared_auto_exposure_is_bounded_and_holds_within_tolerance(self):
+        settings = self.config['camera_preview']
+        self.assertEqual(_next_shared_exposure(15000, 180, settings), 15000)
+        self.assertEqual(_next_shared_exposure(15000, 255, settings), 7500)
+        self.assertEqual(_next_shared_exposure(15000, 0, settings), 30000)
+        self.assertEqual(_next_shared_exposure(100, 255, settings), 100)
+        self.assertEqual(_next_shared_exposure(500000, 0, settings), 500000)
 
     def test_file_preview_source_reads_latest_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:

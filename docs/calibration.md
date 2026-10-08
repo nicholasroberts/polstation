@@ -33,6 +33,14 @@ cross-camera responsivity calibration. They are commissioning diagnostics, not
 scientific measurements, and are not written as observations. Camera IDs and
 their verified analyser angles belong in ignored local configuration.
 
+The preview producer's auto-exposure is shared: it applies the same exposure to
+all three cameras from the brightest configured preview percentile. Independent
+camera auto-exposure is deliberately disabled because it would alter the analyser
+ratios. Exposure changes between preview cycles, so the readback published with
+each camera and the top-level exposure-control metadata must accompany any
+interpretation. This bounded display controller is not a calibrated acquisition
+exposure policy.
+
 Maintain calibration procedures and small reviewed JSON/CSV metadata in Git.
 Store dark maps, flat fields, response arrays and other large assets on separate
 instrument storage with backups. Git LFS is optional and is not configured here.

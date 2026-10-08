@@ -122,8 +122,10 @@ port and browse to `http://127.0.0.1:8080`:
 ssh -N -L 8080:127.0.0.1:8000 OPERATOR@ACTUAL_PI_ADDRESS
 ```
 
-The producer temporarily selects a 1500-byte camera packet, Mono8, and free-run
-triggering, and restores the preceding values on clean shutdown. Stop it with
+The producer temporarily selects a 1500-byte camera packet, Mono8, free-run
+triggering, and bounded shared auto-exposure, and restores the preceding values
+on clean shutdown. The same exposure is applied to all three cameras; independent
+camera auto-exposure is disabled so it cannot corrupt the analyser ratios. Stop it with
 `Ctrl+C`. Do not use this path as evidence of synchronized exposure or raw-data
 preservation.
 

@@ -29,6 +29,12 @@ class ScaffoldTests(unittest.TestCase):
     def test_examples_and_validation(self):
         import yaml
         load_config(ROOT / "config/example_field_config.yaml")
+        legacy = copy.deepcopy(self.config)
+        legacy.pop("camera_preview")
+        legacy_path = Path(self.tmp.name) / "legacy.yaml"
+        legacy_path.write_text(yaml.safe_dump(legacy))
+        self.assertEqual(load_config(legacy_path)["camera_preview"]["exposure_mode"],
+                         "shared_auto")
         for section, key, value in [("dashboard", "host", "0.0.0.0"),
                                     ("dashboard", "port", True),
                                     ("acquisition", "heartbeat_seconds", 0),
