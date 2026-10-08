@@ -70,6 +70,13 @@ opens a device. Old snapshots are marked stale using the configured dashboard
 threshold. This first implementation is for hardware evaluation, not the future
 scientific acquisition service or synchronized streaming.
 
+When all three configured cameras have positive `preview_relative_gain` values,
+the producer applies those scalars to the corresponding 0°/45°/90° preview
+intensities immediately before Stokes processing. Configuration validation also
+requires a calibration ID. Snapshot metadata and the dashboard distinguish this
+limited relative-sensitivity normalization from missing dark/flat correction,
+registration, synchronization, and full scientific calibration.
+
 The diagnostic producer uses bounded shared auto-exposure by default. It measures
 the configured high percentile in each bounded Mono8 preview, takes the brightest
 of the three, and applies one identical next exposure to all cameras. Camera-local

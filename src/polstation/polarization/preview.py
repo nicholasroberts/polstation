@@ -48,17 +48,26 @@ def encode_png(pixels, width, height, *, channels=1):
             + _chunk(b"IDAT", zlib.compress(rows, 3)) + _chunk(b"IEND", b""))
 
 
-def polarization_values(i0, i45, i90):
+def polarization_values(i0, i45, i90, *, relative_gains=(1.0, 1.0, 1.0)):
     """Return DoLP fractions and sensor-relative AoP degrees.
 
     Inputs must be corresponding Mono8 preview pixels. Separate-camera spatial
-    registration, temporal synchronization, and radiometric calibration are not
-    performed here.
+    registration, temporal synchronization, and dark correction are not
+    performed here. Optional relative gains are applied to I0, I45, and I90
+    respectively before the Stokes calculation.
     """
     if len(i0) != len(i45) or len(i0) != len(i90):
         raise ValueError("polarization inputs must have matching dimensions")
+    if (len(relative_gains) != 3
+            or any(isinstance(gain, bool) or not isinstance(gain, (int, float))
+                   or not math.isfinite(gain) or gain <= 0 for gain in relative_gains)):
+        raise ValueError("relative gains must contain three finite positive numbers")
+    gain0, gain45, gain90 = relative_gains
     dolp_values, aop_values = [], []
-    for zero, forty_five, ninety in zip(i0, i45, i90):
+    for raw_zero, raw_forty_five, raw_ninety in zip(i0, i45, i90):
+        zero = gain0 * raw_zero
+        forty_five = gain45 * raw_forty_five
+        ninety = gain90 * raw_ninety
         s0 = zero + ninety
         q = zero - ninety
         u = 2 * forty_five - s0
@@ -69,10 +78,12 @@ def polarization_values(i0, i45, i90):
     return dolp_values, aop_values
 
 
-def polarization_rgb(i0, i45, i90):
+def polarization_rgb(i0, i45, i90, *, relative_gains=(1.0, 1.0, 1.0)):
     """Colour fixed-scale DoLP and AoP diagnostic maps."""
     plasma, phase = _table("plasma"), _table("phase")
-    dolp_values, aop_values = polarization_values(i0, i45, i90)
+    dolp_values, aop_values = polarization_values(
+        i0, i45, i90, relative_gains=relative_gains
+    )
     dolp_rgb, aop_rgb = bytearray(len(i0) * 3), bytearray(len(i0) * 3)
     for index, (dolp, aop) in enumerate(zip(dolp_values, aop_values)):
         dolp_index = min(int(dolp * 256), 255)

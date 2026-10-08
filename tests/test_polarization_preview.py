@@ -36,6 +36,17 @@ class PolarizationPreviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matching dimensions"):
             polarization_values(b"\0", b"\0\0", b"\0")
 
+    def test_relative_gains_are_applied_before_stokes(self):
+        dolp, aop = polarization_values(
+            bytes([50]), bytes([100]), bytes([100]),
+            relative_gains=(2.0, 1.0, 1.0),
+        )
+        self.assertEqual(dolp, [0.0])
+        self.assertEqual(aop, [None])
+
+        with self.assertRaisesRegex(ValueError, "three finite positive"):
+            polarization_values(b"\1", b"\1", b"\1", relative_gains=(1, 0, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

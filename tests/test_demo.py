@@ -14,6 +14,7 @@ from polstation.cameras.preview import (
     FilePreviewSource,
     _next_shared_exposure,
     _percentile_dn,
+    _polarization_snapshot,
     mono8_preview_png,
 )
 from polstation.config import load_config
@@ -106,6 +107,26 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(_next_shared_exposure(15000, 0, settings), 30000)
         self.assertEqual(_next_shared_exposure(100, 255, settings), 100)
         self.assertEqual(_next_shared_exposure(500000, 0, settings), 500000)
+
+    def test_polarization_snapshot_reports_relative_sensitivity_normalization(self):
+        gains = (2.0, 1.0, 1.0)
+        sampled = {}
+        for camera, angle, gain, pixels in zip(
+                self.config["cameras"], (0, 45, 90), gains,
+                (bytes([50]), bytes([100]), bytes([100]))):
+            camera["polarizer_angle_deg"] = angle
+            camera["preview_relative_gain"] = gain
+            sampled[camera["id"]] = (1, 1, pixels)
+        self.config["provenance"]["calibration_id"] = "relative-test"
+
+        result = _polarization_snapshot(self.config, sampled)
+
+        self.assertEqual(result["state"], "live")
+        self.assertTrue(result["relative_sensitivity_corrected"])
+        self.assertFalse(result["dark_corrected"])
+        self.assertFalse(result["calibrated"])
+        self.assertEqual(result["calibration_id"], "relative-test")
+        self.assertEqual(result["relative_gains_by_angle"], {0: 2.0, 45: 1.0, 90: 1.0})
 
     def test_file_preview_source_reads_latest_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:

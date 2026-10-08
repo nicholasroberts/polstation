@@ -24,6 +24,10 @@ function renderPolarization(data, hardware) {
   if (!hardware) return;
   const polarization = data.polarization || {state: 'unavailable', error: 'No polarization preview received'};
   const live = polarization.state === 'live';
+  const warning = document.querySelector('#polarization-warning');
+  warning.textContent = polarization.relative_sensitivity_corrected
+    ? `Sequential camera frames · spatially unregistered · temporally unsynchronized · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
+    : 'Sequential camera frames · spatially unregistered · temporally unsynchronized · radiometrically uncalibrated';
   document.querySelector('#polarization-status').textContent = live ? 'Diagnostic maps updating' : polarization.state === 'stale' ? 'Derived maps are stale' : polarization.error || 'Derived maps unavailable';
   for (const [kind, label] of [['dolp', 'DoLP'], ['aop', 'AoP']]) {
     const image = document.querySelector(`#${kind}-preview`);

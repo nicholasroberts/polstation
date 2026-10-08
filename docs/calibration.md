@@ -33,6 +33,17 @@ cross-camera responsivity calibration. They are commissioning diagnostics, not
 scientific measurements, and are not written as observations. Camera IDs and
 their verified analyser angles belong in ignored local configuration.
 
+The preview can optionally apply one positive relative-sensitivity multiplier
+per configured camera. For preview pixels, the implemented order is
+`I'angle = preview_relative_gain * Iangle`, followed by the three-analyser Stokes
+equations above. All three gains and `provenance.calibration_id` are required
+together. This improves the commissioning display but does not make it a
+scientific calibration: the preview still lacks exposure- and temperature-aware
+dark subtraction, flat-field correction, spatial registration, and synchronized
+exposures. The future scientific order is raw preservation, linearisation, dark
+correction, flat/relative-response correction, registration, and then Stokes
+processing.
+
 The preview producer's auto-exposure is shared: it applies the same exposure to
 all three cameras from the brightest configured preview percentile. Independent
 camera auto-exposure is deliberately disabled because it would alter the analyser

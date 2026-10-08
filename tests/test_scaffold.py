@@ -31,10 +31,14 @@ class ScaffoldTests(unittest.TestCase):
         load_config(ROOT / "config/example_field_config.yaml")
         legacy = copy.deepcopy(self.config)
         legacy.pop("camera_preview")
+        for camera in legacy["cameras"]:
+            camera.pop("preview_relative_gain")
         legacy_path = Path(self.tmp.name) / "legacy.yaml"
         legacy_path.write_text(yaml.safe_dump(legacy))
         self.assertEqual(load_config(legacy_path)["camera_preview"]["exposure_mode"],
                          "shared_auto")
+        self.assertTrue(all(camera["preview_relative_gain"] is None
+                            for camera in load_config(legacy_path)["cameras"]))
         for section, key, value in [("dashboard", "host", "0.0.0.0"),
                                     ("dashboard", "port", True),
                                     ("acquisition", "heartbeat_seconds", 0),
@@ -54,6 +58,24 @@ class ScaffoldTests(unittest.TestCase):
             path.write_text(yaml.safe_dump(config))
             with self.assertRaisesRegex(ValueError, "polarizer angles"):
                 load_config(path)
+
+        config = copy.deepcopy(self.config)
+        config["cameras"][0]["preview_relative_gain"] = 1.1
+        path = Path(self.tmp.name) / "partial-gains.yaml"
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "all three cameras"):
+            load_config(path)
+
+        config = copy.deepcopy(self.config)
+        for camera, gain in zip(config["cameras"], (1.5, 1.0, 0.98)):
+            camera["preview_relative_gain"] = gain
+        path = Path(self.tmp.name) / "unidentified-gains.yaml"
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "calibration_id"):
+            load_config(path)
+        config["provenance"]["calibration_id"] = "preview-relative-response-test"
+        path.write_text(yaml.safe_dump(config))
+        self.assertEqual(load_config(path)["cameras"][0]["preview_relative_gain"], 1.5)
 
         config = copy.deepcopy(self.config)
         config["sensors"]["bme280"].update({"bus": 1, "address": None})

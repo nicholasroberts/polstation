@@ -38,7 +38,19 @@ def _polarization_snapshot(config, sampled):
         if len(dimensions) != 1:
             raise ValueError("camera preview dimensions differ")
         width, height = dimensions.pop()
-        dolp, aop = polarization_rgb(by_angle[0][2], by_angle[45][2], by_angle[90][2])
+        gains_by_angle = {
+            camera["polarizer_angle_deg"]: camera["preview_relative_gain"]
+            for camera in configured
+        }
+        sensitivity_corrected = all(gain is not None for gain in gains_by_angle.values())
+        relative_gains = tuple(
+            gains_by_angle[angle] if sensitivity_corrected else 1.0
+            for angle in (0, 45, 90)
+        )
+        dolp, aop = polarization_rgb(
+            by_angle[0][2], by_angle[45][2], by_angle[90][2],
+            relative_gains=relative_gains,
+        )
         def encode(value):
             return base64.b64encode(value).decode("ascii")
 
@@ -47,6 +59,11 @@ def _polarization_snapshot(config, sampled):
             "registered": False,
             "synchronized": False,
             "calibrated": False,
+            "relative_sensitivity_corrected": sensitivity_corrected,
+            "dark_corrected": False,
+            "calibration_id": (config["provenance"]["calibration_id"]
+                               if sensitivity_corrected else None),
+            "relative_gains_by_angle": dict(zip((0, 45, 90), relative_gains)),
             "aop_reference": "sensor-relative",
             "width": width,
             "height": height,

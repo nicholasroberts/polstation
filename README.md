@@ -4,7 +4,8 @@ Python scaffold for a Raspberry Pi 5 sky-polarization instrument intended for a
 year-long unattended deployment. **This is not field-ready software.** Its main
 acquisition process remains a scaffold and does not yet record images or operate
 sensors. A separate Pi-tested Vimba X diagnostic captures bounded Mono8 previews
-and can calculate uncalibrated DoLP/AoP previews. A separate read-only sensor
+and can calculate diagnostic DoLP/AoP previews, optionally using an explicitly
+identified provisional relative-sensitivity normalization. A separate read-only sensor
 diagnostic publishes BME280 and EPEVER telemetry; neither path is scientific acquisition.
 
 Planned hardware: three Allied Vision Mako G-223B PoE cameras, a BME280 over I2C,
@@ -93,7 +94,8 @@ queue. The dashboard only renders these snapshots.
 An initial hardware-preview path has been verified on the Pi 5. It is a bounded
 diagnostic, not scientific acquisition: the producer captures the three cameras
 sequentially in Mono8, publishes replaceable latest-frame previews, and records
-no observations. Frames are not synchronized, registered, or calibrated.
+no observations. Frames are not synchronized or registered, and the preview is
+not a complete scientific calibration.
 
 For the polarization diagnostic, use an ignored local configuration that maps
 the three camera IDs to the physically verified analyser angles 0°, 45°, and
@@ -101,7 +103,10 @@ the three camera IDs to the physically verified analyser angles 0°, 45°, and
 three mapped frames are available, the dashboard shows a DoLP map on a fixed
 plasma 0–100% scale and a sensor-relative AoP map on a fixed cyclic cmocean phase
 0–180° scale. The page labels both products as sequential, unregistered,
-unsynchronized, and uncalibrated.
+unsynchronized, and either radiometrically uncalibrated or provisionally
+relative-sensitivity-normalized. The latter requires all three positive
+`preview_relative_gain` values and a `provenance.calibration_id`; dark and flat
+corrections remain absent and are stated on the page.
 
 With the SDK-matched VmbPy environment active and all three cameras discovered:
 

@@ -38,6 +38,7 @@ def load_config(path):
     for camera in cameras:
         if camera["model"] != "Allied Vision Mako G-223B":
             raise ValueError("unexpected camera model")
+        camera.setdefault("preview_relative_gain", None)
     angles = [camera["polarizer_angle_deg"] for camera in cameras]
     if any(angle is not None for angle in angles):
         if any(isinstance(angle, bool) for angle in angles) or set(angles) != {0, 45, 90}:
@@ -110,6 +111,14 @@ def load_config(path):
     for key in ("git_commit", "release_tag", "calibration_id"):
         if provenance[key] is not None and not isinstance(provenance[key], str):
             raise ValueError(f"{key} must be a string or null")
+    preview_gains = [camera["preview_relative_gain"] for camera in cameras]
+    if any(gain is not None for gain in preview_gains):
+        if any(gain is None for gain in preview_gains):
+            raise ValueError("preview relative gains must be configured for all three cameras")
+        for gain in preview_gains:
+            positive(gain, "camera preview_relative_gain")
+        if not provenance["calibration_id"]:
+            raise ValueError("preview relative gains require provenance.calibration_id")
     for key in ("data_root", "state_root"):
         path_value = Path(config["storage"][key]).expanduser()
         config["storage"][key] = str((config_path.parent / path_value).resolve())
