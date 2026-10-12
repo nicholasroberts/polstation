@@ -26,10 +26,10 @@ function renderPolarization(data, hardware) {
   const live = polarization.state === 'live';
   const warning = document.querySelector('#polarization-warning');
   warning.textContent = polarization.correction_method === 'provisional_instrument_matrix'
-    ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · provisional instrument matrix (${polarization.calibration_id || 'calibration ID unavailable'}) · bounded scalar dark model · per-pixel dark/flat uncorrected`
+    ? `Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · provisional instrument matrix (${polarization.calibration_id || 'calibration ID unavailable'}) · bounded scalar dark model · per-pixel dark/flat uncorrected`
     : polarization.relative_sensitivity_corrected
-      ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
-      : 'Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · radiometrically uncalibrated';
+      ? `Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
+      : 'Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · radiometrically uncalibrated';
   document.querySelector('#polarization-status').textContent = live ? 'Diagnostic maps updating' : polarization.state === 'stale' ? 'Derived maps are stale' : polarization.error || 'Derived maps unavailable';
   for (const [kind, label] of [['dolp', 'DoLP'], ['aop', 'AoP']]) {
     const image = document.querySelector(`#${kind}-preview`);
@@ -99,7 +99,7 @@ function render(data) {
   const hardware = data.mode === 'hardware-preview';
   document.querySelector('#scenario-control').hidden = hardware;
   document.querySelector('#banner-title').textContent = hardware ? 'HARDWARE PREVIEW — not recording' : 'DEMO — no cameras connected';
-  document.querySelector('#banner-detail').textContent = hardware ? 'Real camera frames. Sequential, unsynchronized and not saved as observations.' : 'All images and camera values are simulated. No scientific data is recorded.';
+  document.querySelector('#banner-detail').textContent = hardware ? 'Real camera frames. Software-parallel requests, synchronization unverified, and not saved as observations.' : 'All images and camera values are simulated. No scientific data is recorded.';
   document.querySelector('#source-label').textContent = hardware ? 'Vimba X · real cameras' : 'Simulation';
   document.querySelector('#channel-count').textContent = String(data.cameras.length).padStart(2, '0');
   document.querySelector('#footer-status').textContent = hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
@@ -154,7 +154,7 @@ async function refresh() {
     render(data);
     lastSuccess = Date.now();
     error.hidden = true;
-    document.querySelector('#connection').textContent = data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · sequential and unsynchronized` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
+    document.querySelector('#connection').textContent = data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · software-parallel · synchronization unverified` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
   } catch (_) {
     if (ticket === sequence) markUnavailable('Cannot reach the preview source. Displayed frames are no longer live. Reconnecting automatically…');
   } finally {

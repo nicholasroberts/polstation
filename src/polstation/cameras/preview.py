@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import json
@@ -25,6 +26,41 @@ from polstation.storage.layout import prepare_state
 from polstation.storage.manifests import write_json
 
 logger = logging.getLogger(__name__)
+
+
+def _parallel_camera_calls(cameras, operation, *, executor=None):
+    """Run one bounded operation per camera after releasing a shared barrier."""
+    cameras = tuple(cameras)
+    if not cameras:
+        return []
+    barrier = threading.Barrier(len(cameras))
+
+    def run(camera):
+        barrier.wait()
+        requested_monotonic = time.monotonic()
+        requested_at = datetime.now(timezone.utc).isoformat()
+        try:
+            value = operation(camera)
+            error = None
+        except Exception as caught:
+            value = None
+            error = caught
+        return {
+            "camera": camera,
+            "value": value,
+            "error": error,
+            "requested_monotonic": requested_monotonic,
+            "requested_at_utc": requested_at,
+            "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if executor is not None:
+        futures = [executor.submit(run, camera) for camera in cameras]
+        return [future.result() for future in futures]
+    with ThreadPoolExecutor(
+            max_workers=len(cameras), thread_name_prefix="camera-preview") as temporary:
+        futures = [temporary.submit(run, camera) for camera in cameras]
+        return [future.result() for future in futures]
 
 
 def mono8_preview_png(buffer, width, height, *, max_width=640, max_height=400):
@@ -316,7 +352,7 @@ class FilePreviewSource:
 
 
 def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
-    """Publish sequential real-camera previews; never write observations."""
+    """Publish software-parallel real-camera previews; never write observations."""
     try:
         from vmbpy import FrameStatus, PixelFormat, VmbSystem
     except ImportError as error:
@@ -334,6 +370,9 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
             raise RuntimeError(f"expected three cameras, found {len(cameras)}")
         with ExitStack() as stack:
             opened = [stack.enter_context(camera) for camera in cameras]
+            capture_executor = stack.enter_context(ThreadPoolExecutor(
+                max_workers=len(opened), thread_name_prefix="camera-preview"
+            ))
             originals = []
             try:
                 for camera in opened:
@@ -364,10 +403,22 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                     cycle_started = time.monotonic()
                     snapshots = []
                     sampled = {}
-                    for camera in opened:
+                    outcomes = _parallel_camera_calls(
+                        opened,
+                        lambda camera: camera.get_frame(timeout_ms=timeout_ms),
+                        executor=capture_executor,
+                    )
+                    request_span_ms = 1000 * (
+                        max(item["requested_monotonic"] for item in outcomes)
+                        - min(item["requested_monotonic"] for item in outcomes)
+                    )
+                    for outcome in outcomes:
+                        camera = outcome["camera"]
                         camera_id = camera.get_id()
                         try:
-                            frame = camera.get_frame(timeout_ms=timeout_ms)
+                            if outcome["error"] is not None:
+                                raise outcome["error"]
+                            frame = outcome["value"]
                             if frame.get_status() != FrameStatus.Complete:
                                 raise RuntimeError(f"incomplete frame: {frame.get_status()}")
                             width, height = frame.get_width(), frame.get_height()
@@ -384,7 +435,9 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                             snapshots.append({
                                 "id": camera_id, "model": camera.get_model(), "state": "live",
                                 "simulated": False, "frame_number": counters[camera_id],
-                                "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+                                "captured_at_utc": outcome["completed_at_utc"],
+                                "capture_request_at_utc": outcome["requested_at_utc"],
+                                "capture_completed_at_utc": outcome["completed_at_utc"],
                                 "age_seconds": 0.0, "exposure_us": _read_feature(camera, "ExposureTimeAbs", "ExposureTime"),
                                 "gain_db": _read_feature(camera, "Gain", "GainRaw"),
                                 "focus_metric": focus_metric,
@@ -398,6 +451,8 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                             snapshots.append({"id": camera_id, "model": camera.get_model(), "state": "disconnected",
                                               "simulated": False, "frame_number": counters.get(camera_id),
                                               "captured_at_utc": None, "age_seconds": None, "exposure_us": None,
+                                              "capture_request_at_utc": outcome["requested_at_utc"],
+                                              "capture_completed_at_utc": outcome["completed_at_utc"],
                                               "gain_db": None, "pixel_format": None, "device_timestamp": None,
                                               "focus_metric": None, "preview_png": None,
                                               "error": str(error)})
@@ -414,7 +469,10 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                             )
                     write_json(output, {"schema_version": 1, "mode": "hardware-preview",
                                        "hardware_ready": all(item["state"] == "live" for item in snapshots),
-                                       "recording": False, "synchronization": "unverified",
+                                       "recording": False,
+                                       "capture_mode": "software_parallel",
+                                       "synchronization": "software-parallel-unverified",
+                                       "capture_request_span_ms": request_span_ms,
                                        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
                                        "exposure_control": {
                                            "mode": exposure_mode,

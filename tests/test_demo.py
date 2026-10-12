@@ -4,6 +4,7 @@ from pathlib import Path
 import struct
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
@@ -14,6 +15,7 @@ from polstation.cameras.preview import (
     FilePreviewSource,
     _focus_metric,
     _next_shared_exposure,
+    _parallel_camera_calls,
     _percentile_dn,
     _polarization_snapshot,
     mono8_preview_png,
@@ -81,6 +83,7 @@ class DemoTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 assets[asset] = response.read().decode()
         self.assertIn('Central circular ROI only · outside masked', assets['dashboard.js'])
+        self.assertIn('software-parallel capture requests', assets['dashboard.js'])
         self.assertIn("camera.focus_metric", assets['dashboard.js'])
         with urlopen(base + '/api/previews?scenario=faults') as response:
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
@@ -114,6 +117,43 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(_next_shared_exposure(15000, 0, settings), 30000)
         self.assertEqual(_next_shared_exposure(100, 255, settings), 100)
         self.assertEqual(_next_shared_exposure(500000, 0, settings), 500000)
+
+    def test_camera_calls_are_parallel_and_failures_remain_per_camera(self):
+        lock = threading.Lock()
+        all_started = threading.Event()
+        active = 0
+        maximum_active = 0
+
+        def operation(camera):
+            nonlocal active, maximum_active
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+                if active == 3:
+                    all_started.set()
+            self.assertTrue(all_started.wait(1))
+            time.sleep(0.01)
+            with lock:
+                active -= 1
+            if camera == "camera-2":
+                raise RuntimeError("camera-specific failure")
+            return camera + "-frame"
+
+        outcomes = _parallel_camera_calls(
+            ("camera-1", "camera-2", "camera-3"), operation
+        )
+
+        self.assertEqual(maximum_active, 3)
+        self.assertEqual([item["camera"] for item in outcomes],
+                         ["camera-1", "camera-2", "camera-3"])
+        self.assertEqual(outcomes[0]["value"], "camera-1-frame")
+        self.assertIsInstance(outcomes[1]["error"], RuntimeError)
+        self.assertEqual(outcomes[2]["value"], "camera-3-frame")
+        self.assertLess(
+            max(item["requested_monotonic"] for item in outcomes)
+            - min(item["requested_monotonic"] for item in outcomes),
+            0.1,
+        )
 
     def test_focus_metric_uses_only_central_circular_roi(self):
         width = height = 9

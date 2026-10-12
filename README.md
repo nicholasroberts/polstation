@@ -92,19 +92,21 @@ queue. The dashboard only renders these snapshots.
 ## Diagnostic preview with three real cameras
 
 An initial hardware-preview path has been verified on the Pi 5. It is a bounded
-diagnostic, not scientific acquisition: the producer captures the three cameras
-sequentially in Mono8, publishes replaceable latest-frame previews, and records
-no observations. Frames are not synchronized or registered, and the preview is
-not a complete scientific calibration.
+diagnostic, not scientific acquisition: the producer issues barrier-released
+software-parallel Mono8 capture requests to the three cameras, publishes
+replaceable latest-frame previews, and records no observations. Request timing
+is reported, but exposure synchronization has not been measured; frames remain
+unregistered and the preview is not a complete scientific calibration.
 
 For the polarization diagnostic, use an ignored local configuration that maps
 the three camera IDs to the physically verified analyser angles 0°, 45°, and
 90°. Hardware IDs are intentionally not stored in this repository. When all
 three mapped frames are available, the dashboard shows a DoLP map on a fixed
 plasma 0–100% scale and a sensor-relative AoP map on a fixed cyclic cmocean phase
-0–180° scale. The page labels both products as sequential, unregistered,
-unsynchronized, and either radiometrically uncalibrated or provisionally
-relative-sensitivity-normalized. The latter requires all three positive
+0–180° scale. The page labels both products as software-parallel but
+unregistered and synchronization-unverified, and either radiometrically
+uncalibrated or provisionally relative-sensitivity-normalized. The latter
+requires all three positive
 `preview_relative_gain` values and a `provenance.calibration_id`; dark and flat
 corrections remain absent and are stated on the page.
 

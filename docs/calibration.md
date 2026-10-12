@@ -30,11 +30,12 @@ reviewed central circular ROI as the linearity workflow (centre 50%/50%, radius
 60% of half the smaller image dimension); pixels outside this fisheye region are
 displayed black and are not interpreted.
 
-These maps combine sequential frames from separate cameras without spatial
-registration, exposure synchronization, dark/flat correction, linearisation, or
-cross-camera responsivity calibration. They are commissioning diagnostics, not
-scientific measurements, and are not written as observations. Camera IDs and
-their verified analyser angles belong in ignored local configuration.
+These maps combine frames returned by barrier-released software-parallel capture
+requests to separate cameras without spatial registration or verified exposure
+synchronization. The generic path also lacks dark/flat correction, linearisation,
+and cross-camera responsivity calibration. They are commissioning diagnostics,
+not scientific measurements, and are not written as observations. Camera IDs
+and their verified analyser angles belong in ignored local configuration.
 
 The preview can optionally apply one positive relative-sensitivity multiplier
 per configured camera. For preview pixels, the implemented order is

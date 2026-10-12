@@ -61,14 +61,17 @@ health remain unchanged.
 ## Real-camera diagnostic preview
 
 `polstation-camera-preview` is a separate, explicitly preview-only producer. It
-owns VmbPy and the cameras, captures sequential Mono8 frames, reduces them to
-bounded PNGs, derives bounded DoLP/AoP diagnostic maps when local camera-angle
-mapping is complete, and atomically replaces `camera-previews.json` in the state root.
+owns VmbPy and the cameras, issues one barrier-released software-parallel Mono8
+capture request per camera, reduces returned frames to bounded PNGs, derives
+bounded DoLP/AoP diagnostic maps when local camera-angle mapping is complete,
+and atomically replaces `camera-previews.json` in the state root.
 It does not write observations. `polstation-dashboard --hardware-preview` reads
 that file through `FilePreviewSource`; the web process never imports VmbPy or
 opens a device. Old snapshots are marked stale using the configured dashboard
 threshold. This first implementation is for hardware evaluation, not the future
-scientific acquisition service or synchronized streaming.
+scientific acquisition service or synchronized streaming. Request timestamps
+and their span are diagnostic only: software-parallel calls do not establish or
+measure exposure synchronization.
 
 When all three configured cameras have positive `preview_relative_gain` values,
 the producer applies those scalars to the corresponding 0°/45°/90° preview
