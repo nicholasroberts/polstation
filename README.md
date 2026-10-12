@@ -98,6 +98,14 @@ replaceable latest-frame previews, and records no observations. Request timing
 is reported, but exposure synchronization has not been measured; frames remain
 unregistered and the preview is not a complete scientific calibration.
 
+`camera_preview.stream_bytes_per_second` optionally sets the Vimba X
+`StreamBytesPerSecond` limit on each camera for the duration of the preview and
+restores the preceding values on clean shutdown. Leave it `null` until the
+deployed camera network has been measured. The commissioned Pi 5/TSW101 path
+completed 90 of 90 software-parallel Mono8 frames with a configured
+30,000,000 bytes/s per camera; that site value belongs in the ignored field
+configuration, not the repository default.
+
 For the polarization diagnostic, use an ignored local configuration that maps
 the three camera IDs to the physically verified analyser angles 0°, 45°, and
 90°. Hardware IDs are intentionally not stored in this repository. When all

@@ -37,6 +37,17 @@ class ScaffoldTests(unittest.TestCase):
         legacy_path.write_text(yaml.safe_dump(legacy))
         self.assertEqual(load_config(legacy_path)["camera_preview"]["exposure_mode"],
                          "shared_auto")
+        self.assertIsNone(
+            load_config(legacy_path)["camera_preview"]["stream_bytes_per_second"]
+        )
+        legacy_preview = copy.deepcopy(self.config)
+        legacy_preview["camera_preview"].pop("stream_bytes_per_second")
+        legacy_preview_path = Path(self.tmp.name) / "legacy-preview.yaml"
+        legacy_preview_path.write_text(yaml.safe_dump(legacy_preview))
+        self.assertIsNone(
+            load_config(legacy_preview_path)["camera_preview"]
+            ["stream_bytes_per_second"]
+        )
         self.assertTrue(all(camera["preview_relative_gain"] is None
                             for camera in load_config(legacy_path)["cameras"]))
         for section, key, value in [("dashboard", "host", "0.0.0.0"),
@@ -49,6 +60,23 @@ class ScaffoldTests(unittest.TestCase):
             path.write_text(yaml.safe_dump(config))
             with self.assertRaises(ValueError):
                 load_config(path)
+
+        for value in (0, -1, 30_000_000.0, True, "30000000"):
+            config = copy.deepcopy(self.config)
+            config["camera_preview"]["stream_bytes_per_second"] = value
+            path = Path(self.tmp.name) / "bad-stream-limit.yaml"
+            path.write_text(yaml.safe_dump(config))
+            with self.assertRaisesRegex(ValueError, "stream_bytes_per_second"):
+                load_config(path)
+
+        config = copy.deepcopy(self.config)
+        config["camera_preview"]["stream_bytes_per_second"] = 30_000_000
+        path = Path(self.tmp.name) / "stream-limit.yaml"
+        path.write_text(yaml.safe_dump(config))
+        self.assertEqual(
+            load_config(path)["camera_preview"]["stream_bytes_per_second"],
+            30_000_000,
+        )
 
         for angles in ([0, 45, None], [0, 45, 135], [False, 45, 90]):
             config = copy.deepcopy(self.config)

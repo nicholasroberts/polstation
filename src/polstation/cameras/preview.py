@@ -362,8 +362,10 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
     output = Path(config["storage"]["state_root"]) / "camera-previews.json"
     exposure_settings = config["camera_preview"]
     exposure_mode = exposure_settings["exposure_mode"]
+    stream_bytes_per_second = exposure_settings["stream_bytes_per_second"]
     shared_exposure_us = exposure_settings["initial_exposure_us"]
     counters = {}
+    applied_stream_limits = {}
     with VmbSystem.get_instance() as vmb:
         cameras = sorted(vmb.get_all_cameras(), key=lambda camera: camera.get_id())
         if len(cameras) != 3:
@@ -377,6 +379,10 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
             try:
                 for camera in opened:
                     packet = camera.get_feature_by_name("GevSCPSPacketSize")
+                    stream = (
+                        camera.get_feature_by_name("StreamBytesPerSecond")
+                        if stream_bytes_per_second is not None else None
+                    )
                     trigger = camera.get_feature_by_name("TriggerMode")
                     exposure = _feature(camera, "ExposureTimeAbs", "ExposureTime")
                     exposure_auto = _feature(camera, "ExposureAuto")
@@ -384,6 +390,8 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                         "camera": camera,
                         "packet": packet,
                         "packet_value": packet.get(),
+                        "stream": stream,
+                        "stream_value": stream.get() if stream is not None else None,
                         "pixel_format": camera.get_pixel_format(),
                         "trigger": trigger,
                         "trigger_value": trigger.get(),
@@ -394,6 +402,11 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                     }
                     originals.append(original)
                     packet.set(1500)
+                    if stream is not None:
+                        stream.set(stream_bytes_per_second)
+                        applied_stream_limits[camera.get_id()] = stream.get()
+                    else:
+                        applied_stream_limits[camera.get_id()] = None
                     camera.set_pixel_format(PixelFormat.Mono8)
                     trigger.set("Off")
                     exposure_auto.set("Off")
@@ -439,6 +452,9 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                                 "capture_request_at_utc": outcome["requested_at_utc"],
                                 "capture_completed_at_utc": outcome["completed_at_utc"],
                                 "age_seconds": 0.0, "exposure_us": _read_feature(camera, "ExposureTimeAbs", "ExposureTime"),
+                                "stream_bytes_per_second": (
+                                    applied_stream_limits[camera_id]
+                                ),
                                 "gain_db": _read_feature(camera, "Gain", "GainRaw"),
                                 "focus_metric": focus_metric,
                                 "focus_metric_method": "central-ROI variance of 4-neighbour Laplacian (DN^2)",
@@ -451,6 +467,9 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                             snapshots.append({"id": camera_id, "model": camera.get_model(), "state": "disconnected",
                                               "simulated": False, "frame_number": counters.get(camera_id),
                                               "captured_at_utc": None, "age_seconds": None, "exposure_us": None,
+                                              "stream_bytes_per_second": (
+                                                  applied_stream_limits[camera_id]
+                                              ),
                                               "capture_request_at_utc": outcome["requested_at_utc"],
                                               "capture_completed_at_utc": outcome["completed_at_utc"],
                                               "gain_db": None, "pixel_format": None, "device_timestamp": None,
@@ -472,6 +491,7 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                                        "recording": False,
                                        "capture_mode": "software_parallel",
                                        "synchronization": "software-parallel-unverified",
+                                       "configured_stream_bytes_per_second_per_camera": stream_bytes_per_second,
                                        "capture_request_span_ms": request_span_ms,
                                        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
                                        "exposure_control": {
@@ -501,6 +521,8 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                         original["exposure_auto"].set(original["exposure_auto_value"])
                         original["trigger"].set(original["trigger_value"])
                         original["camera"].set_pixel_format(original["pixel_format"])
+                        if original["stream"] is not None:
+                            original["stream"].set(original["stream_value"])
                         original["packet"].set(original["packet_value"])
                     except Exception:
                         logger.exception(

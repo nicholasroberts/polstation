@@ -7,6 +7,7 @@ import yaml
 
 DEFAULT_CAMERA_PREVIEW = {
     "exposure_mode": "shared_auto",
+    "stream_bytes_per_second": None,
     "initial_exposure_us": 15000,
     "minimum_exposure_us": 100,
     "maximum_exposure_us": 500000,
@@ -52,6 +53,7 @@ def load_config(path):
     camera_preview = config.setdefault("camera_preview", DEFAULT_CAMERA_PREVIEW.copy())
     if not isinstance(camera_preview, dict):
         raise ValueError("camera_preview must be a mapping")
+    camera_preview.setdefault("stream_bytes_per_second", None)
     missing_preview = set(DEFAULT_CAMERA_PREVIEW) - set(camera_preview)
     if missing_preview:
         raise ValueError(
@@ -59,6 +61,12 @@ def load_config(path):
         )
     if camera_preview["exposure_mode"] not in ("fixed", "shared_auto"):
         raise ValueError("camera preview exposure_mode must be fixed or shared_auto")
+    stream_limit = camera_preview["stream_bytes_per_second"]
+    if (stream_limit is not None
+            and (type(stream_limit) is not int or stream_limit <= 0)):
+        raise ValueError(
+            "camera_preview.stream_bytes_per_second must be a positive integer or null"
+        )
     for name in (
         "initial_exposure_us", "minimum_exposure_us", "maximum_exposure_us",
         "brightness_percentile", "target_brightness_dn", "maximum_step_factor",

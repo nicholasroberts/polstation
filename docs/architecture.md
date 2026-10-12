@@ -73,6 +73,13 @@ scientific acquisition service or synchronized streaming. Request timestamps
 and their span are diagnostic only: software-parallel calls do not establish or
 measure exposure synchronization.
 
+An optional per-camera `StreamBytesPerSecond` setting bounds aggregate GigE
+traffic during software-parallel capture. It is deployment configuration because
+the safe value depends on the complete network path. The producer reads and
+restores each camera's preceding limit on clean shutdown and publishes the
+configured value with its latest-frame snapshot. Transport success does not
+upgrade the synchronization claim.
+
 When all three configured cameras have positive `preview_relative_gain` values,
 the producer applies those scalars to the corresponding 0°/45°/90° preview
 intensities immediately before Stokes processing. Configuration validation also

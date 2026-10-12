@@ -10,6 +10,7 @@ acquisition:
   retry_max_seconds: 60
 camera_preview:
   exposure_mode: shared_auto
+  stream_bytes_per_second: null  # Commission on the deployed camera network before setting.
   initial_exposure_us: 15000
   minimum_exposure_us: 100
   maximum_exposure_us: 500000
