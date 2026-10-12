@@ -1,8 +1,8 @@
 # Calibration plan
 
-No scientific calibration or polarization product pipeline is implemented yet.
-The hardware-preview producer includes a deliberately limited diagnostic
-three-analyser calculation so camera orientation and scene response can be
+No scientific calibration or observation polarization pipeline is implemented
+yet. The hardware-preview producer includes deliberately limited diagnostic
+three-analyser processing so camera orientation and scene response can be
 inspected during commissioning.
 
 ## Diagnostic three-analyser preview
@@ -25,13 +25,75 @@ halved exactly once to obtain AoP.
 
 DoLP uses a fixed plasma 0–100% scale. AoP uses a fixed cyclic cmocean phase
 0–180° scale, with 0° and 180° meeting at the same colour. The tables and their
-upstream licences are stored with the package.
+upstream licences are stored with the package. Both derived maps use the same
+reviewed central circular ROI as the linearity workflow (centre 50%/50%, radius
+60% of half the smaller image dimension); pixels outside this fisheye region are
+displayed black and are not interpreted.
 
-These maps combine sequential frames from separate cameras without spatial
-registration, exposure synchronization, dark/flat correction, linearisation, or
-cross-camera responsivity calibration. They are commissioning diagnostics, not
-scientific measurements, and are not written as observations. Camera IDs and
-their verified analyser angles belong in ignored local configuration.
+These maps combine frames returned by barrier-released software-parallel capture
+requests to separate cameras without spatial registration or verified exposure
+synchronization. The generic path also lacks dark/flat correction, linearisation,
+and cross-camera responsivity calibration. They are commissioning diagnostics,
+not scientific measurements, and are not written as observations. Camera IDs
+and their verified analyser angles belong in ignored local configuration.
+
+The preview can optionally apply one positive relative-sensitivity multiplier
+per configured camera. For preview pixels, the implemented order is
+`I'angle = preview_relative_gain * Iangle`, followed by the three-analyser Stokes
+equations above. All three gains and `provenance.calibration_id` are required
+together. This improves the commissioning display but does not make it a
+scientific calibration: the preview still lacks exposure- and temperature-aware
+dark subtraction, flat-field correction, spatial registration, and synchronized
+exposures. The future scientific order is raw preservation, linearisation, dark
+correction, flat/relative-response correction, registration, and then Stokes
+processing.
+
+The preview also supports an explicitly provisional 3x3 instrument response
+matrix. For ordered camera signals `c` and relative Stokes vector `s`, its model
+is `c = M s`; the implementation subtracts configured exposure-interpolated
+central-ROI scalar dark offsets and computes `s = inverse(M) c`. It then rotates
+`Q,U` by twice the configured AoP reference offset before calculating DoLP and
+AoP. Matrix rows and dark curves are tied to exact camera IDs. Processing is
+refused outside the calibration's explicitly supported exposure range. Any
+bounded policy below the first measured dark point must be declared in the
+calibration metadata rather than silently inferred. The displayed DoLP remains
+clipped to 0–100%, while the fit and validation may retain unclipped values.
+
+This matrix mode remains diagnostic. Its scalar dark offsets are not per-pixel
+dark maps, and it does not correct flat field, lens shading, spatial
+registration, temperature dependence, source flicker, or sequential exposure
+timing. Consequently its metadata continues to report `calibrated: false` and
+`dark_corrected: false`; `scalar_dark_offset_corrected` identifies the narrower
+operation actually performed.
+
+Calibration `preview-instrument-matrix-20261008-v2` retains the v1 response
+matrix and extends the scalar dark curve with measured 1, 2, 5, and 10 ms
+points from blocked-camera capture `dark-20261007T100301Z`. This permits direct
+interpolation down to 1 ms. From the configured 0.1 ms camera-preview minimum
+up to 1 ms, the implementation holds the measured 1 ms offset constant rather
+than extrapolating a noisy slope. Snapshot metadata distinguishes the supported
+range, measured dark range, and this low-exposure policy. The source summary and
+manifest SHA-256 hashes are recorded in the v2 calibration asset. This bounded
+extension is suitable for the provisional outdoor preview but remains subject
+to the same scalar-dark, temperature, flat-field, registration, and timing
+limitations as v1.
+
+The preview producer's auto-exposure is shared: it applies the same exposure to
+all three cameras from the brightest configured preview percentile. Independent
+camera auto-exposure is deliberately disabled because it would alter the analyser
+ratios. Exposure changes between preview cycles, so the readback published with
+each camera and the top-level exposure-control metadata must accompany any
+interpretation. This bounded display controller is not a calibrated acquisition
+exposure policy.
+
+Each live camera card reports a focus diagnostic calculated on the bounded
+Mono8 preview as the variance of the four-neighbour discrete Laplacian within
+the central circular ROI. Neighbour samples must also fall inside the ROI, so
+the blank outer fisheye region cannot influence the score. The value has units
+of DN² and is useful only for relative comparison under the same target,
+illumination, exposure, gain, and preview sampling. It is not a calibrated MTF
+measurement and must not be compared across changing scenes as an absolute
+focus criterion.
 
 Maintain calibration procedures and small reviewed JSON/CSV metadata in Git.
 Store dark maps, flat fields, response arrays and other large assets on separate
@@ -45,6 +107,56 @@ future dataset and retain the assets for reproducibility.
 
 Commissioning must establish dark/flat corrections, camera response, optical
 alignment, polarizer orientations and timing error before deriving polarization.
+
+## Camera-linearity scouting capture
+
+`polstation-camera-linearity` acquires a controlled Mono12 exposure sweep from
+the three configured cameras. It writes every original frame buffer used by the
+calculation, a CSV summary, a completion manifest with hashes and settings, and
+three diagnostic plots: central-ROI median response with fitted straight lines,
+residuals from those fits, and grouped boxplots of the central-ROI pixel
+distribution. The camera order alternates between repeats to reduce monotonic
+source-drift bias, but acquisition remains sequential and is labelled as such.
+An incomplete GigE frame is rejected and retried up to three times. Successful
+manifests record every rejected attempt and the attempt number of each retained
+frame; exhaustion of the bounded retry still fails the capture explicitly.
+
+The default ROI exactly reproduces the reviewed earlier program: a circle at
+50% image width, 50% image height, with radius 60% of half the smaller image
+dimension. This is the primary scientific region for the fisheye images. The
+outside-ROI median is retained and plotted as a dynamic-baseline diagnostic,
+and the CSV includes ROI median minus outside median. The outside value is not
+automatically subtracted because that interpretation still requires validation.
+Each box represents the pixel distribution in the mean image for one camera and
+exposure: 25th–75th percentiles, median, and 5th–95th percentile whiskers.
+
+The scout fits `raw ROI median = intercept + slope * exposure`; it does not
+claim that the intercept is a validated dark correction. Points whose ROI median
+exceeds 90% of the 12-bit range or for which any captured frame has more than
+0.1% saturated ROI pixels are shown but excluded from fitting. An independently
+acquired exposure- and temperature-aware dark library is still required before
+producing calibration gains.
+
+Install the optional analysis dependencies into a dedicated calibration
+environment, stop the preview producer so it releases the cameras, and write to
+a new directory outside Git:
+
+```sh
+python -m pip install -e '.[calibration]'
+sudo systemctl stop polstation-camera-preview.service
+polstation-camera-linearity \
+  --config /etc/polstation/config.yaml \
+  --output "$HOME/polstation-calibration/linearity-YYYYMMDD-HHMMSS" \
+  --exposures-ms 1 2 5 10 15 25 40 60 100 \
+  --frames 5 \
+  --source-note 'Verified unpolarized five-diffuser source; record control-polarizer relative angle here'
+sudo systemctl start polstation-camera-preview.service
+```
+
+An output directory without `manifest.json` is an incomplete capture and must be
+retained and investigated rather than treated as calibration data. Raw `.raw`
+files are little-endian Mono12 samples stored in 16-bit words at the dimensions
+recorded per frame. Large calibration captures remain outside Git.
 
 ## Earlier Ubuntu workflow
 

@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import json
@@ -13,11 +14,53 @@ import time
 
 from polstation.config import load_config
 from polstation.logging.setup import configure
-from polstation.polarization.preview import encode_png, legend_rgb, polarization_rgb, sample_mono8
+from polstation.polarization.preview import (
+    central_circular_roi,
+    encode_png,
+    instrument_matrix_rgb,
+    legend_rgb,
+    polarization_rgb,
+    sample_mono8,
+)
 from polstation.storage.layout import prepare_state
 from polstation.storage.manifests import write_json
 
 logger = logging.getLogger(__name__)
+
+
+def _parallel_camera_calls(cameras, operation, *, executor=None):
+    """Run one bounded operation per camera after releasing a shared barrier."""
+    cameras = tuple(cameras)
+    if not cameras:
+        return []
+    barrier = threading.Barrier(len(cameras))
+
+    def run(camera):
+        barrier.wait()
+        requested_monotonic = time.monotonic()
+        requested_at = datetime.now(timezone.utc).isoformat()
+        try:
+            value = operation(camera)
+            error = None
+        except Exception as caught:
+            value = None
+            error = caught
+        return {
+            "camera": camera,
+            "value": value,
+            "error": error,
+            "requested_monotonic": requested_monotonic,
+            "requested_at_utc": requested_at,
+            "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if executor is not None:
+        futures = [executor.submit(run, camera) for camera in cameras]
+        return [future.result() for future in futures]
+    with ThreadPoolExecutor(
+            max_workers=len(cameras), thread_name_prefix="camera-preview") as temporary:
+        futures = [temporary.submit(run, camera) for camera in cameras]
+        return [future.result() for future in futures]
 
 
 def mono8_preview_png(buffer, width, height, *, max_width=640, max_height=400):
@@ -28,17 +71,116 @@ def mono8_preview_png(buffer, width, height, *, max_width=640, max_height=400):
     return encode_png(pixels, sampled_width, sampled_height)
 
 
-def _polarization_snapshot(config, sampled):
+def _focus_metric(pixels, width, height, roi_mask):
+    """Variance of a four-neighbour Laplacian inside the central preview ROI."""
+    if len(pixels) != width * height or len(roi_mask) != len(pixels):
+        raise ValueError("focus inputs must match preview dimensions")
+    count = 0
+    total = 0.0
+    total_squared = 0.0
+    for y in range(1, height - 1):
+        row = y * width
+        for x in range(1, width - 1):
+            index = row + x
+            if not (roi_mask[index] and roi_mask[index - 1] and roi_mask[index + 1]
+                    and roi_mask[index - width] and roi_mask[index + width]):
+                continue
+            laplacian = (4 * pixels[index] - pixels[index - 1] - pixels[index + 1]
+                         - pixels[index - width] - pixels[index + width])
+            count += 1
+            total += laplacian
+            total_squared += laplacian * laplacian
+    if count == 0:
+        raise ValueError("focus ROI contains no interior pixels")
+    mean = total / count
+    return total_squared / count - mean * mean
+
+
+def _interpolate_dark_offset(
+        exposure_ms, exposures, values, *, minimum_supported_exposure_ms=None,
+        below_measured_policy=None):
+    minimum_supported = (exposures[0] if minimum_supported_exposure_ms is None
+                         else minimum_supported_exposure_ms)
+    if not minimum_supported <= exposure_ms <= exposures[-1]:
+        raise ValueError(
+            f"instrument matrix is valid only from {minimum_supported:g} "
+            f"to {exposures[-1]:g} ms; "
+            f"current exposure is {exposure_ms:g} ms"
+        )
+    if exposure_ms < exposures[0]:
+        if below_measured_policy == "hold_first_offset":
+            return values[0]
+        raise ValueError(
+            f"no dark-offset policy is configured below the first measured "
+            f"exposure of {exposures[0]:g} ms"
+        )
+    for index, upper in enumerate(exposures):
+        if exposure_ms <= upper:
+            if index == 0:
+                return values[0]
+            lower = exposures[index - 1]
+            fraction = (exposure_ms - lower) / (upper - lower)
+            return values[index - 1] + fraction * (values[index] - values[index - 1])
+    raise AssertionError("validated exposure was not interpolated")
+
+
+def _polarization_snapshot(config, sampled, exposure_us=None):
     configured = [camera for camera in config["cameras"] if camera["polarizer_angle_deg"] is not None]
+    matrix = config.get("polarization_preview", {}).get("instrument_matrix")
     if not configured:
         return {"state": "unconfigured", "error": "Set local camera IDs and analyser angles 0, 45, and 90"}
     try:
-        by_angle = {camera["polarizer_angle_deg"]: sampled[camera["id"]] for camera in configured}
-        dimensions = {(item[0], item[1]) for item in by_angle.values()}
+        by_id = {camera["id"]: sampled[camera["id"]] for camera in configured}
+        by_angle = {camera["polarizer_angle_deg"]: by_id[camera["id"]] for camera in configured}
+        dimensions = {(item[0], item[1]) for item in by_id.values()}
         if len(dimensions) != 1:
             raise ValueError("camera preview dimensions differ")
         width, height = dimensions.pop()
-        dolp, aop = polarization_rgb(by_angle[0][2], by_angle[45][2], by_angle[90][2])
+        roi_mask, roi = central_circular_roi(width, height)
+        gains_by_angle = {
+            camera["polarizer_angle_deg"]: camera["preview_relative_gain"]
+            for camera in configured
+        }
+        sensitivity_corrected = all(gain is not None for gain in gains_by_angle.values())
+        relative_gains = tuple(
+            gains_by_angle[angle] if sensitivity_corrected else 1.0
+            for angle in (0, 45, 90)
+        )
+        if matrix is not None:
+            if exposure_us is None:
+                raise ValueError("instrument matrix requires the shared camera exposure")
+            exposure_ms = exposure_us / 1000.0
+            dark = matrix["dark_model"]
+            divisor = dark["mono12_to_mono8_divisor"]
+            dark_offsets = tuple(
+                _interpolate_dark_offset(
+                    exposure_ms,
+                    dark["exposure_ms"],
+                    dark["roi_median_mono12_by_camera"][camera_id],
+                    minimum_supported_exposure_ms=dark.get(
+                        "minimum_supported_exposure_ms"
+                    ),
+                    below_measured_policy=dark.get("below_measured_policy"),
+                ) / divisor
+                for camera_id in matrix["camera_order"]
+            )
+            dolp, aop = instrument_matrix_rgb(
+                tuple(by_id[camera_id][2] for camera_id in matrix["camera_order"]),
+                matrix["response_matrix"],
+                dark_offsets=dark_offsets,
+                aop_offset_deg=matrix["sensor_aop_offset_deg"],
+                roi_mask=roi_mask,
+            )
+            correction_method = "provisional_instrument_matrix"
+        else:
+            dolp, aop = polarization_rgb(
+                by_angle[0][2], by_angle[45][2], by_angle[90][2],
+                relative_gains=relative_gains,
+                roi_mask=roi_mask,
+            )
+            dark_offsets = None
+            exposure_ms = None
+            correction_method = "relative_gain" if sensitivity_corrected else "none"
         def encode(value):
             return base64.b64encode(value).decode("ascii")
 
@@ -47,7 +189,35 @@ def _polarization_snapshot(config, sampled):
             "registered": False,
             "synchronized": False,
             "calibrated": False,
+            "correction_method": correction_method,
+            "relative_sensitivity_corrected": sensitivity_corrected or matrix is not None,
+            "dark_corrected": False,
+            "scalar_dark_offset_corrected": matrix is not None,
+            "calibration_id": (config["provenance"]["calibration_id"]
+                               if sensitivity_corrected or matrix is not None else None),
+            "relative_gains_by_angle": (dict(zip((0, 45, 90), relative_gains))
+                                        if matrix is None else None),
+            "scalar_relative_gains_applied": matrix is None and sensitivity_corrected,
+            "instrument_matrix_camera_order": matrix["camera_order"] if matrix else None,
+            "instrument_matrix_response": matrix["response_matrix"] if matrix else None,
+            "scalar_dark_offsets_dn": dict(zip(matrix["camera_order"], dark_offsets))
+                                      if matrix else None,
+            "matrix_exposure_ms": exposure_ms,
+            "matrix_valid_exposure_ms": ([matrix["dark_model"].get(
+                                               "minimum_supported_exposure_ms",
+                                               matrix["dark_model"]["exposure_ms"][0]),
+                                           matrix["dark_model"]["exposure_ms"][-1]]
+                                          if matrix else None),
+            "matrix_measured_dark_exposure_ms": ([matrix["dark_model"]["exposure_ms"][0],
+                                                    matrix["dark_model"]["exposure_ms"][-1]]
+                                                   if matrix else None),
+            "matrix_low_exposure_dark_policy": (matrix["dark_model"].get(
+                                                     "below_measured_policy")
+                                                  if matrix else None),
+            "sensor_aop_offset_deg": matrix["sensor_aop_offset_deg"] if matrix else 0.0,
             "aop_reference": "sensor-relative",
+            "roi": roi,
+            "outside_roi_masked": True,
             "width": width,
             "height": height,
             "dolp_preview_png": encode(encode_png(dolp, width, height, channels=3)),
@@ -62,6 +232,10 @@ def _polarization_snapshot(config, sampled):
             "registered": False,
             "synchronized": False,
             "calibrated": False,
+            "correction_method": ("provisional_instrument_matrix" if matrix is not None
+                                  else "none"),
+            "calibration_id": (config["provenance"]["calibration_id"]
+                               if matrix is not None else None),
         }
 
 
@@ -72,6 +246,52 @@ def _read_feature(camera, *names):
         except Exception:
             pass
     return None
+
+
+def _feature(camera, *names):
+    for name in names:
+        try:
+            return camera.get_feature_by_name(name)
+        except Exception:
+            pass
+    raise RuntimeError(f"camera {camera.get_id()} has none of features: {', '.join(names)}")
+
+
+def _percentile_dn(pixels, percentile):
+    """Return a nearest-rank percentile from bounded 8-bit preview pixels."""
+    if not pixels:
+        raise ValueError("cannot measure brightness from an empty preview")
+    histogram = [0] * 256
+    for value in pixels:
+        histogram[value] += 1
+    rank = max(1, int((percentile / 100) * len(pixels) + 0.999999999))
+    cumulative = 0
+    for value, count in enumerate(histogram):
+        cumulative += count
+        if cumulative >= rank:
+            return value
+    return 255
+
+
+def _next_shared_exposure(current_us, brightest_dn, settings):
+    """Choose one bounded next exposure for all cameras from the brightest preview."""
+    minimum = settings["minimum_exposure_us"]
+    maximum = settings["maximum_exposure_us"]
+    target = settings["target_brightness_dn"]
+    tolerance = settings["brightness_tolerance_dn"]
+    maximum_step = settings["maximum_step_factor"]
+    if abs(brightest_dn - target) <= tolerance:
+        return current_us
+    if brightest_dn <= 0:
+        factor = maximum_step
+    elif brightest_dn >= 255:
+        # A clipped percentile contains no information about how far over-range
+        # the scene is, so make one conservative bounded downward step.
+        factor = 1 / maximum_step
+    else:
+        factor = target / brightest_dn
+        factor = min(maximum_step, max(1 / maximum_step, factor))
+    return max(minimum, min(maximum, round(current_us * factor)))
 
 
 class FilePreviewSource:
@@ -132,7 +352,7 @@ class FilePreviewSource:
 
 
 def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
-    """Publish sequential real-camera previews; never write observations."""
+    """Publish software-parallel real-camera previews; never write observations."""
     try:
         from vmbpy import FrameStatus, PixelFormat, VmbSystem
     except ImportError as error:
@@ -140,45 +360,105 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
 
     prepare_state(config)
     output = Path(config["storage"]["state_root"]) / "camera-previews.json"
+    exposure_settings = config["camera_preview"]
+    exposure_mode = exposure_settings["exposure_mode"]
+    stream_bytes_per_second = exposure_settings["stream_bytes_per_second"]
+    shared_exposure_us = exposure_settings["initial_exposure_us"]
     counters = {}
+    applied_stream_limits = {}
     with VmbSystem.get_instance() as vmb:
         cameras = sorted(vmb.get_all_cameras(), key=lambda camera: camera.get_id())
         if len(cameras) != 3:
             raise RuntimeError(f"expected three cameras, found {len(cameras)}")
         with ExitStack() as stack:
             opened = [stack.enter_context(camera) for camera in cameras]
+            capture_executor = stack.enter_context(ThreadPoolExecutor(
+                max_workers=len(opened), thread_name_prefix="camera-preview"
+            ))
             originals = []
             try:
                 for camera in opened:
                     packet = camera.get_feature_by_name("GevSCPSPacketSize")
+                    stream = (
+                        camera.get_feature_by_name("StreamBytesPerSecond")
+                        if stream_bytes_per_second is not None else None
+                    )
                     trigger = camera.get_feature_by_name("TriggerMode")
-                    original = (camera, packet, packet.get(), camera.get_pixel_format(), trigger, trigger.get())
+                    exposure = _feature(camera, "ExposureTimeAbs", "ExposureTime")
+                    exposure_auto = _feature(camera, "ExposureAuto")
+                    original = {
+                        "camera": camera,
+                        "packet": packet,
+                        "packet_value": packet.get(),
+                        "stream": stream,
+                        "stream_value": stream.get() if stream is not None else None,
+                        "pixel_format": camera.get_pixel_format(),
+                        "trigger": trigger,
+                        "trigger_value": trigger.get(),
+                        "exposure": exposure,
+                        "exposure_value": exposure.get(),
+                        "exposure_auto": exposure_auto,
+                        "exposure_auto_value": exposure_auto.get(),
+                    }
                     originals.append(original)
                     packet.set(1500)
+                    if stream is not None:
+                        stream.set(stream_bytes_per_second)
+                        applied_stream_limits[camera.get_id()] = stream.get()
+                    else:
+                        applied_stream_limits[camera.get_id()] = None
                     camera.set_pixel_format(PixelFormat.Mono8)
                     trigger.set("Off")
+                    exposure_auto.set("Off")
+                    exposure.set(shared_exposure_us)
 
                 while not stop.is_set():
                     cycle_started = time.monotonic()
                     snapshots = []
                     sampled = {}
-                    for camera in opened:
+                    outcomes = _parallel_camera_calls(
+                        opened,
+                        lambda camera: camera.get_frame(timeout_ms=timeout_ms),
+                        executor=capture_executor,
+                    )
+                    request_span_ms = 1000 * (
+                        max(item["requested_monotonic"] for item in outcomes)
+                        - min(item["requested_monotonic"] for item in outcomes)
+                    )
+                    for outcome in outcomes:
+                        camera = outcome["camera"]
                         camera_id = camera.get_id()
                         try:
-                            frame = camera.get_frame(timeout_ms=timeout_ms)
+                            if outcome["error"] is not None:
+                                raise outcome["error"]
+                            frame = outcome["value"]
                             if frame.get_status() != FrameStatus.Complete:
                                 raise RuntimeError(f"incomplete frame: {frame.get_status()}")
                             width, height = frame.get_width(), frame.get_height()
                             preview_width, preview_height, preview_pixels = sample_mono8(bytes(frame.get_buffer()), width, height)
                             sampled[camera_id] = (preview_width, preview_height, preview_pixels)
+                            focus_roi, focus_roi_metadata = central_circular_roi(
+                                preview_width, preview_height
+                            )
+                            focus_metric = _focus_metric(
+                                preview_pixels, preview_width, preview_height, focus_roi
+                            )
                             encoded = base64.b64encode(encode_png(preview_pixels, preview_width, preview_height)).decode("ascii")
                             counters[camera_id] = counters.get(camera_id, 0) + 1
                             snapshots.append({
                                 "id": camera_id, "model": camera.get_model(), "state": "live",
                                 "simulated": False, "frame_number": counters[camera_id],
-                                "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+                                "captured_at_utc": outcome["completed_at_utc"],
+                                "capture_request_at_utc": outcome["requested_at_utc"],
+                                "capture_completed_at_utc": outcome["completed_at_utc"],
                                 "age_seconds": 0.0, "exposure_us": _read_feature(camera, "ExposureTimeAbs", "ExposureTime"),
+                                "stream_bytes_per_second": (
+                                    applied_stream_limits[camera_id]
+                                ),
                                 "gain_db": _read_feature(camera, "Gain", "GainRaw"),
+                                "focus_metric": focus_metric,
+                                "focus_metric_method": "central-ROI variance of 4-neighbour Laplacian (DN^2)",
+                                "focus_roi": focus_roi_metadata,
                                 "pixel_format": str(frame.get_pixel_format()).rsplit(".", 1)[-1],
                                 "device_timestamp": frame.get_timestamp(), "preview_png": encoded,
                             })
@@ -187,23 +467,68 @@ def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
                             snapshots.append({"id": camera_id, "model": camera.get_model(), "state": "disconnected",
                                               "simulated": False, "frame_number": counters.get(camera_id),
                                               "captured_at_utc": None, "age_seconds": None, "exposure_us": None,
+                                              "stream_bytes_per_second": (
+                                                  applied_stream_limits[camera_id]
+                                              ),
+                                              "capture_request_at_utc": outcome["requested_at_utc"],
+                                              "capture_completed_at_utc": outcome["completed_at_utc"],
                                               "gain_db": None, "pixel_format": None, "device_timestamp": None,
-                                              "preview_png": None, "error": str(error)})
+                                              "focus_metric": None, "preview_png": None,
+                                              "error": str(error)})
+                    brightest_dn = None
+                    next_exposure_us = shared_exposure_us
+                    if len(sampled) == len(opened):
+                        brightest_dn = max(
+                            _percentile_dn(item[2], exposure_settings["brightness_percentile"])
+                            for item in sampled.values()
+                        )
+                        if exposure_mode == "shared_auto":
+                            next_exposure_us = _next_shared_exposure(
+                                shared_exposure_us, brightest_dn, exposure_settings
+                            )
                     write_json(output, {"schema_version": 1, "mode": "hardware-preview",
                                        "hardware_ready": all(item["state"] == "live" for item in snapshots),
-                                       "recording": False, "synchronization": "unverified",
+                                       "recording": False,
+                                       "capture_mode": "software_parallel",
+                                       "synchronization": "software-parallel-unverified",
+                                       "configured_stream_bytes_per_second_per_camera": stream_bytes_per_second,
+                                       "capture_request_span_ms": request_span_ms,
                                        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-                                       "polarization": _polarization_snapshot(config, sampled),
+                                       "exposure_control": {
+                                           "mode": exposure_mode,
+                                           "shared": True,
+                                           "applied_exposure_us": shared_exposure_us,
+                                           "next_exposure_us": next_exposure_us,
+                                           "brightness_percentile": exposure_settings["brightness_percentile"],
+                                           "brightest_percentile_dn": brightest_dn,
+                                           "target_brightness_dn": exposure_settings["target_brightness_dn"],
+                                           "minimum_exposure_us": exposure_settings["minimum_exposure_us"],
+                                           "maximum_exposure_us": exposure_settings["maximum_exposure_us"],
+                                       },
+                                       "polarization": _polarization_snapshot(
+                                           config, sampled, shared_exposure_us
+                                       ),
                                        "cameras": snapshots}, replace=True)
+                    if next_exposure_us != shared_exposure_us:
+                        for original in originals:
+                            original["exposure"].set(next_exposure_us)
+                        shared_exposure_us = next_exposure_us
                     stop.wait(max(0.0, interval - (time.monotonic() - cycle_started)))
             finally:
-                for camera, packet, packet_value, pixel_format, trigger, trigger_value in reversed(originals):
+                for original in reversed(originals):
                     try:
-                        trigger.set(trigger_value)
-                        camera.set_pixel_format(pixel_format)
-                        packet.set(packet_value)
+                        original["exposure"].set(original["exposure_value"])
+                        original["exposure_auto"].set(original["exposure_auto_value"])
+                        original["trigger"].set(original["trigger_value"])
+                        original["camera"].set_pixel_format(original["pixel_format"])
+                        if original["stream"] is not None:
+                            original["stream"].set(original["stream_value"])
+                        original["packet"].set(original["packet_value"])
                     except Exception:
-                        logger.exception("Could not restore preview settings for %s", camera.get_id())
+                        logger.exception(
+                            "Could not restore preview settings for %s",
+                            original["camera"].get_id(),
+                        )
 
 
 def main():

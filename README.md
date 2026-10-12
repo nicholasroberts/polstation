@@ -4,7 +4,8 @@ Python scaffold for a Raspberry Pi 5 sky-polarization instrument intended for a
 year-long unattended deployment. **This is not field-ready software.** Its main
 acquisition process remains a scaffold and does not yet record images or operate
 sensors. A separate Pi-tested Vimba X diagnostic captures bounded Mono8 previews
-and can calculate uncalibrated DoLP/AoP previews. A separate read-only sensor
+and can calculate diagnostic DoLP/AoP previews, optionally using an explicitly
+identified provisional relative-sensitivity normalization. A separate read-only sensor
 diagnostic publishes BME280 and EPEVER telemetry; neither path is scientific acquisition.
 
 Planned hardware: three Allied Vision Mako G-223B PoE cameras, a BME280 over I2C,
@@ -91,17 +92,31 @@ queue. The dashboard only renders these snapshots.
 ## Diagnostic preview with three real cameras
 
 An initial hardware-preview path has been verified on the Pi 5. It is a bounded
-diagnostic, not scientific acquisition: the producer captures the three cameras
-sequentially in Mono8, publishes replaceable latest-frame previews, and records
-no observations. Frames are not synchronized, registered, or calibrated.
+diagnostic, not scientific acquisition: the producer issues barrier-released
+software-parallel Mono8 capture requests to the three cameras, publishes
+replaceable latest-frame previews, and records no observations. Request timing
+is reported, but exposure synchronization has not been measured; frames remain
+unregistered and the preview is not a complete scientific calibration.
+
+`camera_preview.stream_bytes_per_second` optionally sets the Vimba X
+`StreamBytesPerSecond` limit on each camera for the duration of the preview and
+restores the preceding values on clean shutdown. Leave it `null` until the
+deployed camera network has been measured. The commissioned Pi 5/TSW101 path
+completed 90 of 90 software-parallel Mono8 frames with a configured
+30,000,000 bytes/s per camera; that site value belongs in the ignored field
+configuration, not the repository default.
 
 For the polarization diagnostic, use an ignored local configuration that maps
 the three camera IDs to the physically verified analyser angles 0°, 45°, and
 90°. Hardware IDs are intentionally not stored in this repository. When all
 three mapped frames are available, the dashboard shows a DoLP map on a fixed
 plasma 0–100% scale and a sensor-relative AoP map on a fixed cyclic cmocean phase
-0–180° scale. The page labels both products as sequential, unregistered,
-unsynchronized, and uncalibrated.
+0–180° scale. The page labels both products as software-parallel but
+unregistered and synchronization-unverified, and either radiometrically
+uncalibrated or provisionally relative-sensitivity-normalized. The latter
+requires all three positive
+`preview_relative_gain` values and a `provenance.calibration_id`; dark and flat
+corrections remain absent and are stated on the page.
 
 With the SDK-matched VmbPy environment active and all three cameras discovered:
 
@@ -122,8 +137,10 @@ port and browse to `http://127.0.0.1:8080`:
 ssh -N -L 8080:127.0.0.1:8000 OPERATOR@ACTUAL_PI_ADDRESS
 ```
 
-The producer temporarily selects a 1500-byte camera packet, Mono8, and free-run
-triggering, and restores the preceding values on clean shutdown. Stop it with
+The producer temporarily selects a 1500-byte camera packet, Mono8, free-run
+triggering, and bounded shared auto-exposure, and restores the preceding values
+on clean shutdown. The same exposure is applied to all three cameras; independent
+camera auto-exposure is disabled so it cannot corrupt the analyser ratios. Stop it with
 `Ctrl+C`. Do not use this path as evidence of synchronized exposure or raw-data
 preservation.
 

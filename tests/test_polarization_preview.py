@@ -3,7 +3,13 @@
 import math
 import unittest
 
-from polstation.polarization.preview import legend_rgb, polarization_rgb, polarization_values
+from polstation.polarization.preview import (
+    central_circular_roi,
+    instrument_matrix_values,
+    legend_rgb,
+    polarization_rgb,
+    polarization_values,
+)
 
 
 class PolarizationPreviewTests(unittest.TestCase):
@@ -35,6 +41,48 @@ class PolarizationPreviewTests(unittest.TestCase):
     def test_input_lengths_must_match(self):
         with self.assertRaisesRegex(ValueError, "matching dimensions"):
             polarization_values(b"\0", b"\0\0", b"\0")
+
+    def test_relative_gains_are_applied_before_stokes(self):
+        dolp, aop = polarization_values(
+            bytes([50]), bytes([100]), bytes([100]),
+            relative_gains=(2.0, 1.0, 1.0),
+        )
+        self.assertEqual(dolp, [0.0])
+        self.assertEqual(aop, [None])
+
+        with self.assertRaisesRegex(ValueError, "three finite positive"):
+            polarization_values(b"\1", b"\1", b"\1", relative_gains=(1, 0, 1))
+
+    def test_instrument_matrix_subtracts_dark_and_rotates_aop_reference(self):
+        dolp, aop = instrument_matrix_values(
+            (bytes([110]), bytes([10]), bytes([110])),
+            [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            dark_offsets=(10, 10, 10),
+            aop_offset_deg=90,
+        )
+        self.assertAlmostEqual(dolp[0], 1.0)
+        self.assertAlmostEqual(aop[0], 135.0)
+
+    def test_instrument_matrix_rejects_singular_response(self):
+        with self.assertRaisesRegex(ValueError, "nonsingular"):
+            instrument_matrix_values(
+                (b"\1", b"\1", b"\1"),
+                [[1, 0, 0], [1, 0, 0], [0, 0, 1]],
+            )
+
+    def test_derived_maps_are_black_outside_reviewed_circular_roi(self):
+        mask, geometry = central_circular_roi(5, 5)
+        self.assertEqual(geometry["center_x_px"], 2.0)
+        self.assertFalse(mask[0])
+        self.assertTrue(mask[12])
+        dolp_rgb, aop_rgb = polarization_rgb(
+            bytes([100] * 25), bytes([50] * 25), bytes([0] * 25),
+            roi_mask=mask,
+        )
+        self.assertEqual(dolp_rgb[:3], b"\0\0\0")
+        self.assertEqual(aop_rgb[:3], b"\0\0\0")
+        self.assertNotEqual(dolp_rgb[36:39], b"\0\0\0")
+        self.assertNotEqual(aop_rgb[36:39], b"\0\0\0")
 
 
 if __name__ == "__main__":

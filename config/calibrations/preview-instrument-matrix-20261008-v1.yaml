@@ -1,0 +1,17 @@
+# Small reviewed diagnostic-preview metadata. Raw calibration frames remain external.
+camera_order:
+  - DEV_000F315B9FC1
+  - DEV_000F315B9FC2
+  - DEV_000F315B9FC3
+response_matrix:
+  - [2.9987810, -1.8999429, -2.1693866]
+  - [4.3496859, 3.6071487, -2.6424753]
+  - [4.3280390, 3.3462221, 2.6509674]
+sensor_aop_offset_deg: 90
+dark_model:
+  exposure_ms: [15, 30, 75, 150, 225, 375, 600, 900, 1500]
+  roi_median_mono12_by_camera:
+    DEV_000F315B9FC1: [20.0, 21.8, 27.4, 37.8, 48.4, 70.4, 103.8, 148.2, 239.2]
+    DEV_000F315B9FC2: [25.4, 27.4, 37.0, 52.6, 70.2, 102.8, 151.6, 220.2, 355.8]
+    DEV_000F315B9FC3: [12.2, 13.0, 21.6, 37.6, 52.6, 82.8, 130.0, 193.6, 323.6]
+  mono12_to_mono8_divisor: 16

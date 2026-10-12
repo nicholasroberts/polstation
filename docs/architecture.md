@@ -23,7 +23,7 @@ observations occur. The health file can become stale when status writes fail.
 
 Still required for field operation: vendor-supported camera SDK operation on the
 target Pi, permanent network provisioning, measured synchronization, production
-acquisition, exposure control, scientific validation, hung-driver isolation,
+acquisition, scientifically validated exposure control, hung-driver isolation,
 watchdog integration,
 power-loss testing, storage endurance and capacity planning, backup monitoring,
 and long-duration soak testing. Restarting a crashed process does not detect all
@@ -61,14 +61,41 @@ health remain unchanged.
 ## Real-camera diagnostic preview
 
 `polstation-camera-preview` is a separate, explicitly preview-only producer. It
-owns VmbPy and the cameras, captures sequential Mono8 frames, reduces them to
-bounded PNGs, derives bounded DoLP/AoP diagnostic maps when local camera-angle
-mapping is complete, and atomically replaces `camera-previews.json` in the state root.
+owns VmbPy and the cameras, issues one barrier-released software-parallel Mono8
+capture request per camera, reduces returned frames to bounded PNGs, derives
+bounded DoLP/AoP diagnostic maps when local camera-angle mapping is complete,
+and atomically replaces `camera-previews.json` in the state root.
 It does not write observations. `polstation-dashboard --hardware-preview` reads
 that file through `FilePreviewSource`; the web process never imports VmbPy or
 opens a device. Old snapshots are marked stale using the configured dashboard
 threshold. This first implementation is for hardware evaluation, not the future
-scientific acquisition service or synchronized streaming.
+scientific acquisition service or synchronized streaming. Request timestamps
+and their span are diagnostic only: software-parallel calls do not establish or
+measure exposure synchronization.
+
+An optional per-camera `StreamBytesPerSecond` setting bounds aggregate GigE
+traffic during software-parallel capture. It is deployment configuration because
+the safe value depends on the complete network path. The producer reads and
+restores each camera's preceding limit on clean shutdown and publishes the
+configured value with its latest-frame snapshot. Transport success does not
+upgrade the synchronization claim.
+
+When all three configured cameras have positive `preview_relative_gain` values,
+the producer applies those scalars to the corresponding 0°/45°/90° preview
+intensities immediately before Stokes processing. Configuration validation also
+requires a calibration ID. Snapshot metadata and the dashboard distinguish this
+limited relative-sensitivity normalization from missing dark/flat correction,
+registration, synchronization, and full scientific calibration.
+
+The diagnostic producer uses bounded shared auto-exposure by default. It measures
+the configured high percentile in each bounded Mono8 preview, takes the brightest
+of the three, and applies one identical next exposure to all cameras. Camera-local
+auto-exposure remains off because independently selected exposures would corrupt
+the three-analyser intensity ratios. The controller has explicit exposure limits,
+a target, tolerance and maximum per-cycle step in configuration. Its applied and
+next exposure, measured brightness and limits are published in the replaceable
+snapshot. This protects the diagnostic display from gross day/night exposure
+changes; it is not the validated exposure policy for scientific observations.
 
 Polarization processing remains in the producer, not the HTTP request handler.
 Only derived PNGs and explicit validity flags cross the atomic snapshot boundary.
