@@ -78,6 +78,32 @@ class ScaffoldTests(unittest.TestCase):
         self.assertEqual(load_config(path)["cameras"][0]["preview_relative_gain"], 1.5)
 
         config = copy.deepcopy(self.config)
+        camera_ids = [camera["id"] for camera in config["cameras"]]
+        config["provenance"]["calibration_id"] = "instrument-matrix-test"
+        config["polarization_preview"]["instrument_matrix"] = {
+            "camera_order": camera_ids,
+            "response_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "sensor_aop_offset_deg": 90,
+            "dark_model": {
+                "exposure_ms": [15, 30],
+                "roi_median_mono12_by_camera": {
+                    camera_id: [20, 22] for camera_id in camera_ids
+                },
+                "mono12_to_mono8_divisor": 16,
+            },
+        }
+        path = Path(self.tmp.name) / "instrument-matrix.yaml"
+        path.write_text(yaml.safe_dump(config))
+        self.assertEqual(
+            load_config(path)["polarization_preview"]["instrument_matrix"]["sensor_aop_offset_deg"],
+            90,
+        )
+        config["polarization_preview"]["instrument_matrix"]["response_matrix"][1] = [1, 0, 0]
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "nonsingular"):
+            load_config(path)
+
+        config = copy.deepcopy(self.config)
         config["sensors"]["bme280"].update({"bus": 1, "address": None})
         path = Path(self.tmp.name) / "bad-bme280.yaml"
         path.write_text(yaml.safe_dump(config))

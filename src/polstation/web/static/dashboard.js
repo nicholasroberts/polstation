@@ -25,9 +25,11 @@ function renderPolarization(data, hardware) {
   const polarization = data.polarization || {state: 'unavailable', error: 'No polarization preview received'};
   const live = polarization.state === 'live';
   const warning = document.querySelector('#polarization-warning');
-  warning.textContent = polarization.relative_sensitivity_corrected
-    ? `Sequential camera frames · spatially unregistered · temporally unsynchronized · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
-    : 'Sequential camera frames · spatially unregistered · temporally unsynchronized · radiometrically uncalibrated';
+  warning.textContent = polarization.correction_method === 'provisional_instrument_matrix'
+    ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · provisional instrument matrix (${polarization.calibration_id || 'calibration ID unavailable'}) · exposure-aware scalar dark offset · per-pixel dark/flat uncorrected`
+    : polarization.relative_sensitivity_corrected
+      ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
+      : 'Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · radiometrically uncalibrated';
   document.querySelector('#polarization-status').textContent = live ? 'Diagnostic maps updating' : polarization.state === 'stale' ? 'Derived maps are stale' : polarization.error || 'Derived maps unavailable';
   for (const [kind, label] of [['dolp', 'DoLP'], ['aop', 'AoP']]) {
     const image = document.querySelector(`#${kind}-preview`);
@@ -118,6 +120,7 @@ function render(data) {
     card.querySelector('.model').textContent = `${camera.model}${camera.simulated ? ' · simulated source' : ` · ${camera.pixel_format || 'format unknown'}`}`;
     card.querySelector('.exposure').textContent = Number.isFinite(camera.exposure_us) ? `${(camera.exposure_us / 1000).toFixed(1)} ms` : '—';
     card.querySelector('.gain').textContent = Number.isFinite(camera.gain_db) ? `${camera.gain_db.toFixed(1)} dB` : '—';
+    card.querySelector('.focus').textContent = Number.isFinite(camera.focus_metric) ? `${camera.focus_metric.toFixed(1)} DN²` : '—';
     card.querySelector('.age').textContent = camera.age_seconds === null ? '—' : `${camera.age_seconds.toFixed(1)} s`;
     card.querySelector('.frame').textContent = camera.frame_number === null ? '—' : String(camera.frame_number).padStart(6, '0');
     card.querySelector('time').textContent = camera.captured_at_utc ? new Date(camera.captured_at_utc).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : 'No frame available';

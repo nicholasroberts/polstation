@@ -1,8 +1,8 @@
 # Calibration plan
 
-No scientific calibration or polarization product pipeline is implemented yet.
-The hardware-preview producer includes a deliberately limited diagnostic
-three-analyser calculation so camera orientation and scene response can be
+No scientific calibration or observation polarization pipeline is implemented
+yet. The hardware-preview producer includes deliberately limited diagnostic
+three-analyser processing so camera orientation and scene response can be
 inspected during commissioning.
 
 ## Diagnostic three-analyser preview
@@ -25,7 +25,10 @@ halved exactly once to obtain AoP.
 
 DoLP uses a fixed plasma 0–100% scale. AoP uses a fixed cyclic cmocean phase
 0–180° scale, with 0° and 180° meeting at the same colour. The tables and their
-upstream licences are stored with the package.
+upstream licences are stored with the package. Both derived maps use the same
+reviewed central circular ROI as the linearity workflow (centre 50%/50%, radius
+60% of half the smaller image dimension); pixels outside this fisheye region are
+displayed black and are not interpreted.
 
 These maps combine sequential frames from separate cameras without spatial
 registration, exposure synchronization, dark/flat correction, linearisation, or
@@ -44,6 +47,23 @@ exposures. The future scientific order is raw preservation, linearisation, dark
 correction, flat/relative-response correction, registration, and then Stokes
 processing.
 
+The preview also supports an explicitly provisional 3x3 instrument response
+matrix. For ordered camera signals `c` and relative Stokes vector `s`, its model
+is `c = M s`; the implementation subtracts configured exposure-interpolated
+central-ROI scalar dark offsets and computes `s = inverse(M) c`. It then rotates
+`Q,U` by twice the configured AoP reference offset before calculating DoLP and
+AoP. Matrix rows and dark curves are tied to exact camera IDs. Processing is
+refused outside the measured dark-curve exposure range rather than silently
+extrapolating. The displayed DoLP remains clipped to 0–100%, while the fit and
+validation may retain unclipped values.
+
+This matrix mode remains diagnostic. Its scalar dark offsets are not per-pixel
+dark maps, and it does not correct flat field, lens shading, spatial
+registration, temperature dependence, source flicker, or sequential exposure
+timing. Consequently its metadata continues to report `calibrated: false` and
+`dark_corrected: false`; `scalar_dark_offset_corrected` identifies the narrower
+operation actually performed.
+
 The preview producer's auto-exposure is shared: it applies the same exposure to
 all three cameras from the brightest configured preview percentile. Independent
 camera auto-exposure is deliberately disabled because it would alter the analyser
@@ -51,6 +71,15 @@ ratios. Exposure changes between preview cycles, so the readback published with
 each camera and the top-level exposure-control metadata must accompany any
 interpretation. This bounded display controller is not a calibrated acquisition
 exposure policy.
+
+Each live camera card reports a focus diagnostic calculated on the bounded
+Mono8 preview as the variance of the four-neighbour discrete Laplacian within
+the central circular ROI. Neighbour samples must also fall inside the ROI, so
+the blank outer fisheye region cannot influence the score. The value has units
+of DN² and is useful only for relative comparison under the same target,
+illumination, exposure, gain, and preview sampling. It is not a calibrated MTF
+measurement and must not be compared across changing scenes as an absolute
+focus criterion.
 
 Maintain calibration procedures and small reviewed JSON/CSV metadata in Git.
 Store dark maps, flat fields, response arrays and other large assets on separate

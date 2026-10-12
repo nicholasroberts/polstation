@@ -16,6 +16,8 @@ DEFAULT_CAMERA_PREVIEW = {
     "maximum_step_factor": 2,
 }
 
+DEFAULT_POLARIZATION_PREVIEW = {"instrument_matrix": None}
+
 
 def positive(value, name):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -76,6 +78,59 @@ def load_config(path):
         raise ValueError("camera preview brightness tolerance must be below its target")
     if camera_preview["maximum_step_factor"] <= 1:
         raise ValueError("camera preview maximum step factor must exceed one")
+    polarization_preview = config.setdefault(
+        "polarization_preview", DEFAULT_POLARIZATION_PREVIEW.copy()
+    )
+    if not isinstance(polarization_preview, dict):
+        raise ValueError("polarization_preview must be a mapping")
+    matrix_calibration = polarization_preview.get("instrument_matrix")
+    if matrix_calibration is not None:
+        if not isinstance(matrix_calibration, dict):
+            raise ValueError("polarization_preview.instrument_matrix must be a mapping or null")
+        required = {"camera_order", "response_matrix", "sensor_aop_offset_deg", "dark_model"}
+        missing = required - set(matrix_calibration)
+        if missing:
+            raise ValueError("instrument matrix is missing: " + ", ".join(sorted(missing)))
+        if matrix_calibration["camera_order"] != ids:
+            raise ValueError("instrument matrix camera_order must exactly match configured cameras")
+        response = matrix_calibration["response_matrix"]
+        if (not isinstance(response, list) or len(response) != 3
+                or any(not isinstance(row, list) or len(row) != 3 for row in response)
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) for row in response for value in row)):
+            raise ValueError("instrument response_matrix must be a finite 3x3 array")
+        a, b, c = response[0]
+        d, e, f = response[1]
+        g, h, i = response[2]
+        determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+        if abs(determinant) < 1e-12:
+            raise ValueError("instrument response_matrix must be nonsingular")
+        offset = matrix_calibration["sensor_aop_offset_deg"]
+        if (isinstance(offset, bool) or not isinstance(offset, (int, float))
+                or not math.isfinite(offset)):
+            raise ValueError("instrument matrix sensor_aop_offset_deg must be finite")
+        dark = matrix_calibration["dark_model"]
+        if not isinstance(dark, dict):
+            raise ValueError("instrument matrix dark_model must be a mapping")
+        exposures = dark.get("exposure_ms")
+        values = dark.get("roi_median_mono12_by_camera")
+        divisor = dark.get("mono12_to_mono8_divisor")
+        if (not isinstance(exposures, list) or len(exposures) < 2
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) or value <= 0 for value in exposures)
+                or any(left >= right for left, right in zip(exposures, exposures[1:]))):
+            raise ValueError("instrument dark exposure_ms must be strictly increasing positive numbers")
+        if not isinstance(values, dict) or set(values) != set(ids):
+            raise ValueError("instrument dark curves must exactly match configured camera IDs")
+        for camera_id in ids:
+            curve = values[camera_id]
+            if (not isinstance(curve, list) or len(curve) != len(exposures)
+                    or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                           or not math.isfinite(value) or value < 0 for value in curve)):
+                raise ValueError(f"instrument dark curve for {camera_id} is invalid")
+        positive(divisor, "instrument dark mono12_to_mono8_divisor")
+        if not config["provenance"].get("calibration_id"):
+            raise ValueError("instrument matrix requires provenance.calibration_id")
     positive(config["storage"]["minimum_free_bytes"], "minimum_free_bytes")
     positive(config["dashboard"]["stale_after_seconds"], "stale_after_seconds")
     if config["dashboard"]["host"] != "127.0.0.1":
