@@ -53,9 +53,10 @@ is `c = M s`; the implementation subtracts configured exposure-interpolated
 central-ROI scalar dark offsets and computes `s = inverse(M) c`. It then rotates
 `Q,U` by twice the configured AoP reference offset before calculating DoLP and
 AoP. Matrix rows and dark curves are tied to exact camera IDs. Processing is
-refused outside the measured dark-curve exposure range rather than silently
-extrapolating. The displayed DoLP remains clipped to 0–100%, while the fit and
-validation may retain unclipped values.
+refused outside the calibration's explicitly supported exposure range. Any
+bounded policy below the first measured dark point must be declared in the
+calibration metadata rather than silently inferred. The displayed DoLP remains
+clipped to 0–100%, while the fit and validation may retain unclipped values.
 
 This matrix mode remains diagnostic. Its scalar dark offsets are not per-pixel
 dark maps, and it does not correct flat field, lens shading, spatial
@@ -63,6 +64,18 @@ registration, temperature dependence, source flicker, or sequential exposure
 timing. Consequently its metadata continues to report `calibrated: false` and
 `dark_corrected: false`; `scalar_dark_offset_corrected` identifies the narrower
 operation actually performed.
+
+Calibration `preview-instrument-matrix-20261008-v2` retains the v1 response
+matrix and extends the scalar dark curve with measured 1, 2, 5, and 10 ms
+points from blocked-camera capture `dark-20261007T100301Z`. This permits direct
+interpolation down to 1 ms. From the configured 0.1 ms camera-preview minimum
+up to 1 ms, the implementation holds the measured 1 ms offset constant rather
+than extrapolating a noisy slope. Snapshot metadata distinguishes the supported
+range, measured dark range, and this low-exposure policy. The source summary and
+manifest SHA-256 hashes are recorded in the v2 calibration asset. This bounded
+extension is suitable for the provisional outdoor preview but remains subject
+to the same scalar-dark, temperature, flat-field, registration, and timing
+limitations as v1.
 
 The preview producer's auto-exposure is shared: it applies the same exposure to
 all three cameras from the brightest configured preview percentile. Independent

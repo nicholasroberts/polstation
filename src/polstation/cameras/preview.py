@@ -60,11 +60,23 @@ def _focus_metric(pixels, width, height, roi_mask):
     return total_squared / count - mean * mean
 
 
-def _interpolate_dark_offset(exposure_ms, exposures, values):
-    if not exposures[0] <= exposure_ms <= exposures[-1]:
+def _interpolate_dark_offset(
+        exposure_ms, exposures, values, *, minimum_supported_exposure_ms=None,
+        below_measured_policy=None):
+    minimum_supported = (exposures[0] if minimum_supported_exposure_ms is None
+                         else minimum_supported_exposure_ms)
+    if not minimum_supported <= exposure_ms <= exposures[-1]:
         raise ValueError(
-            f"instrument matrix is valid only from {exposures[0]:g} to {exposures[-1]:g} ms; "
+            f"instrument matrix is valid only from {minimum_supported:g} "
+            f"to {exposures[-1]:g} ms; "
             f"current exposure is {exposure_ms:g} ms"
+        )
+    if exposure_ms < exposures[0]:
+        if below_measured_policy == "hold_first_offset":
+            return values[0]
+        raise ValueError(
+            f"no dark-offset policy is configured below the first measured "
+            f"exposure of {exposures[0]:g} ms"
         )
     for index, upper in enumerate(exposures):
         if exposure_ms <= upper:
@@ -109,6 +121,10 @@ def _polarization_snapshot(config, sampled, exposure_us=None):
                     exposure_ms,
                     dark["exposure_ms"],
                     dark["roi_median_mono12_by_camera"][camera_id],
+                    minimum_supported_exposure_ms=dark.get(
+                        "minimum_supported_exposure_ms"
+                    ),
+                    below_measured_policy=dark.get("below_measured_policy"),
                 ) / divisor
                 for camera_id in matrix["camera_order"]
             )
@@ -151,9 +167,17 @@ def _polarization_snapshot(config, sampled, exposure_us=None):
             "scalar_dark_offsets_dn": dict(zip(matrix["camera_order"], dark_offsets))
                                       if matrix else None,
             "matrix_exposure_ms": exposure_ms,
-            "matrix_valid_exposure_ms": ([matrix["dark_model"]["exposure_ms"][0],
+            "matrix_valid_exposure_ms": ([matrix["dark_model"].get(
+                                               "minimum_supported_exposure_ms",
+                                               matrix["dark_model"]["exposure_ms"][0]),
                                            matrix["dark_model"]["exposure_ms"][-1]]
                                           if matrix else None),
+            "matrix_measured_dark_exposure_ms": ([matrix["dark_model"]["exposure_ms"][0],
+                                                    matrix["dark_model"]["exposure_ms"][-1]]
+                                                   if matrix else None),
+            "matrix_low_exposure_dark_policy": (matrix["dark_model"].get(
+                                                     "below_measured_policy")
+                                                  if matrix else None),
             "sensor_aop_offset_deg": matrix["sensor_aop_offset_deg"] if matrix else 0.0,
             "aop_reference": "sensor-relative",
             "roi": roi,

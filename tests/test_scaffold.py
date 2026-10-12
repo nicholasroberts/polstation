@@ -98,6 +98,21 @@ class ScaffoldTests(unittest.TestCase):
             load_config(path)["polarization_preview"]["instrument_matrix"]["sensor_aop_offset_deg"],
             90,
         )
+        dark = config["polarization_preview"]["instrument_matrix"]["dark_model"]
+        dark["minimum_supported_exposure_ms"] = 1
+        dark["below_measured_policy"] = "hold_first_offset"
+        path.write_text(yaml.safe_dump(config))
+        self.assertEqual(
+            load_config(path)["polarization_preview"]["instrument_matrix"]
+            ["dark_model"]["minimum_supported_exposure_ms"],
+            1,
+        )
+        dark["below_measured_policy"] = "linear_extrapolation"
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "hold_first_offset"):
+            load_config(path)
+        dark.pop("minimum_supported_exposure_ms")
+        dark.pop("below_measured_policy")
         config["polarization_preview"]["instrument_matrix"]["response_matrix"][1] = [1, 0, 0]
         path.write_text(yaml.safe_dump(config))
         with self.assertRaisesRegex(ValueError, "nonsingular"):
@@ -116,6 +131,31 @@ class ScaffoldTests(unittest.TestCase):
         path.write_text(yaml.safe_dump(config))
         with self.assertRaisesRegex(ValueError, "configured together"):
             load_config(path)
+
+    def test_low_exposure_instrument_matrix_asset_is_valid(self):
+        import yaml
+        calibration = yaml.safe_load(
+            (ROOT / "config/calibrations/preview-instrument-matrix-20261008-v2.yaml")
+            .read_text()
+        )
+        config = copy.deepcopy(self.config)
+        for camera, camera_id, angle in zip(
+                config["cameras"], calibration["camera_order"], (0, 45, 90)):
+            camera["id"] = camera_id
+            camera["polarizer_angle_deg"] = angle
+        config["provenance"]["calibration_id"] = (
+            "preview-instrument-matrix-20261008-v2"
+        )
+        config["polarization_preview"]["instrument_matrix"] = calibration
+        path = Path(self.tmp.name) / "low-exposure-instrument-matrix.yaml"
+        path.write_text(yaml.safe_dump(config))
+
+        loaded = load_config(path)
+
+        dark = loaded["polarization_preview"]["instrument_matrix"]["dark_model"]
+        self.assertEqual(dark["exposure_ms"][:4], [1, 2, 5, 10])
+        self.assertEqual(dark["minimum_supported_exposure_ms"], 0.1)
+        self.assertEqual(dark["below_measured_policy"], "hold_first_offset")
 
     def test_no_observations_and_provenance(self):
         run(self.config, threading.Event(), once=True)

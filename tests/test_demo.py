@@ -190,6 +190,41 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(unavailable["correction_method"], "provisional_instrument_matrix")
         self.assertIn("valid only from 15 to 30 ms", unavailable["error"])
 
+    def test_instrument_matrix_holds_first_dark_offset_below_measured_range(self):
+        sampled = {}
+        pixels = (bytes([110]), bytes([10]), bytes([110]))
+        for camera, angle, channel in zip(self.config["cameras"], (0, 45, 90), pixels):
+            camera["polarizer_angle_deg"] = angle
+            sampled[camera["id"]] = (1, 1, channel)
+        camera_ids = [camera["id"] for camera in self.config["cameras"]]
+        self.config["provenance"]["calibration_id"] = "low-exposure-matrix-test"
+        self.config["polarization_preview"]["instrument_matrix"] = {
+            "camera_order": camera_ids,
+            "response_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "sensor_aop_offset_deg": 90,
+            "dark_model": {
+                "exposure_ms": [1, 5],
+                "roi_median_mono12_by_camera": {
+                    camera_id: [16, 32] for camera_id in camera_ids
+                },
+                "mono12_to_mono8_divisor": 16,
+                "minimum_supported_exposure_ms": 0.1,
+                "below_measured_policy": "hold_first_offset",
+            },
+        }
+
+        result = _polarization_snapshot(self.config, sampled, 500)
+
+        self.assertEqual(result["state"], "live")
+        self.assertEqual(result["scalar_dark_offsets_dn"], dict.fromkeys(camera_ids, 1.0))
+        self.assertEqual(result["matrix_valid_exposure_ms"], [0.1, 5])
+        self.assertEqual(result["matrix_measured_dark_exposure_ms"], [1, 5])
+        self.assertEqual(result["matrix_low_exposure_dark_policy"], "hold_first_offset")
+
+        unavailable = _polarization_snapshot(self.config, sampled, 50)
+        self.assertEqual(unavailable["state"], "unavailable")
+        self.assertIn("valid only from 0.1 to 5 ms", unavailable["error"])
+
     def test_file_preview_source_reads_latest_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             self.config['storage']['state_root'] = directory

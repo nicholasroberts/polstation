@@ -129,6 +129,25 @@ def load_config(path):
                            or not math.isfinite(value) or value < 0 for value in curve)):
                 raise ValueError(f"instrument dark curve for {camera_id} is invalid")
         positive(divisor, "instrument dark mono12_to_mono8_divisor")
+        minimum_supported = dark.get("minimum_supported_exposure_ms", exposures[0])
+        positive(minimum_supported, "instrument dark minimum_supported_exposure_ms")
+        if minimum_supported > exposures[0]:
+            raise ValueError(
+                "instrument dark minimum_supported_exposure_ms must not exceed "
+                "the first measured exposure"
+            )
+        low_exposure_policy = dark.get("below_measured_policy")
+        if minimum_supported < exposures[0]:
+            if low_exposure_policy != "hold_first_offset":
+                raise ValueError(
+                    "instrument dark exposures below the first measured point "
+                    "require below_measured_policy: hold_first_offset"
+                )
+        elif low_exposure_policy is not None:
+            raise ValueError(
+                "instrument dark below_measured_policy requires a supported "
+                "exposure below the first measured point"
+            )
         if not config["provenance"].get("calibration_id"):
             raise ValueError("instrument matrix requires provenance.calibration_id")
     positive(config["storage"]["minimum_free_bytes"], "minimum_free_bytes")

@@ -26,7 +26,7 @@ function renderPolarization(data, hardware) {
   const live = polarization.state === 'live';
   const warning = document.querySelector('#polarization-warning');
   warning.textContent = polarization.correction_method === 'provisional_instrument_matrix'
-    ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · provisional instrument matrix (${polarization.calibration_id || 'calibration ID unavailable'}) · exposure-aware scalar dark offset · per-pixel dark/flat uncorrected`
+    ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · provisional instrument matrix (${polarization.calibration_id || 'calibration ID unavailable'}) · bounded scalar dark model · per-pixel dark/flat uncorrected`
     : polarization.relative_sensitivity_corrected
       ? `Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
       : 'Central circular ROI only · outside masked · sequential camera frames · spatially unregistered · temporally unsynchronized · radiometrically uncalibrated';
