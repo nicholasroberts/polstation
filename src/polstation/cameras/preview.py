@@ -302,6 +302,8 @@ class FilePreviewSource:
     def __init__(self, config):
         self.path = Path(config["storage"]["state_root"]) / "camera-previews.json"
         self.sensor_path = Path(config["storage"]["state_root"]) / "sensor-preview.json"
+        self.recorder_path = Path(config["storage"]["state_root"]) / "observation-recorder.json"
+        self.configured_camera_count = len(config["cameras"])
         self.stale_after_seconds = config["dashboard"]["stale_after_seconds"]
 
     def _sensor_snapshot(self, now):
@@ -324,6 +326,41 @@ class FilePreviewSource:
                 for name in ("bme280", "epever")
             }
 
+    def _recorder_snapshot(self, now):
+        try:
+            value = json.loads(self.recorder_path.read_text())
+            if value.get("mode") != "observation-recorder":
+                raise ValueError("invalid observation-recorder snapshot")
+            updated = value.get("updated_at_utc")
+            value["status_age_seconds"] = max(
+                0.0, (now - datetime.fromisoformat(updated)).total_seconds()
+            ) if updated else None
+            value["reported_state"] = value.get("state")
+            if (value["status_age_seconds"] is None
+                    or value["status_age_seconds"] > self.stale_after_seconds):
+                value["state"] = "stale"
+            last = value.get("last_acquisition_at_utc")
+            value["time_since_last_acquisition_seconds"] = max(
+                0.0, (now - datetime.fromisoformat(last)).total_seconds()
+            ) if last else None
+            upcoming = value.get("next_acquisition_at_utc")
+            value["time_until_next_acquisition_seconds"] = max(
+                0.0, (datetime.fromisoformat(upcoming) - now).total_seconds()
+            ) if upcoming else None
+            return value
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return {
+                "state": "unavailable",
+                "reported_state": None,
+                "updated_at_utc": None,
+                "status_age_seconds": None,
+                "last_acquisition_at_utc": None,
+                "time_since_last_acquisition_seconds": None,
+                "next_acquisition_at_utc": None,
+                "time_until_next_acquisition_seconds": None,
+                "last_error": str(error),
+            }
+
     def snapshot(self, scenario="live"):
         if scenario != "live":
             raise ValueError("hardware preview has no simulated fault scenarios")
@@ -340,15 +377,20 @@ class FilePreviewSource:
             value["hardware_ready"] = bool(value["cameras"]) and all(
                 camera["state"] == "live" for camera in value["cameras"]
             )
+            value["configured_camera_count"] = self.configured_camera_count
             if not value["hardware_ready"] and value.get("polarization", {}).get("state") == "live":
                 value["polarization"]["state"] = "stale"
             value["sensors"] = self._sensor_snapshot(now)
+            value["recorder"] = self._recorder_snapshot(now)
             return value
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            now = datetime.now(timezone.utc)
             return {"schema_version": 1, "mode": self.mode, "hardware_ready": False,
                     "recording": False, "synchronization": "unverified",
                     "error": str(error), "cameras": [],
-                    "sensors": self._sensor_snapshot(datetime.now(timezone.utc))}
+                    "configured_camera_count": self.configured_camera_count,
+                    "sensors": self._sensor_snapshot(now),
+                    "recorder": self._recorder_snapshot(now)}
 
 
 def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):

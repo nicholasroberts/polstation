@@ -58,6 +58,41 @@ function sensorBadge(card, sensor, fault = false) {
 function sampleAge(sensor) {
   return Number.isFinite(sensor.age_seconds) ? `Sample age · ${sensor.age_seconds.toFixed(1)} s` : 'No current sample';
 }
+function elapsed(seconds) {
+  if (!Number.isFinite(seconds)) return 'Never';
+  const whole = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(whole / 86400);
+  const hours = Math.floor((whole % 86400) / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = whole % 60;
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+function renderRecorder(data) {
+  const recorder = data.recorder || {state: 'unavailable'};
+  const active = ['waiting', 'capturing'].includes(recorder.state);
+  const labels = {
+    waiting: 'Armed', capturing: 'Capturing', complete: 'Complete',
+    failed: 'Fault', low_disk: 'Paused', stopped: 'Stopped',
+    stale: 'Stale', unavailable: 'Off'
+  };
+  document.querySelector('#recording-state').textContent = labels[recorder.state] || recorder.state;
+  let note = 'not started';
+  if (recorder.state === 'capturing') note = 'three raw frames';
+  else if (recorder.state === 'waiting' && Number.isFinite(recorder.time_until_next_acquisition_seconds)) note = `${recorder.last_attempt_state === 'failed' ? 'last failed · ' : ''}next in ${elapsed(recorder.time_until_next_acquisition_seconds)}`;
+  else if (recorder.state === 'failed') note = recorder.last_error || 'last attempt failed';
+  else if (recorder.state === 'low_disk') note = 'low disk · no deletion';
+  else if (recorder.state === 'stale') note = `last reported ${recorder.reported_state || 'unknown'}`;
+  else if (recorder.state === 'complete') note = 'one-shot finished';
+  document.querySelector('#recording-note').textContent = note;
+  document.querySelector('#last-acquisition').textContent = elapsed(recorder.time_since_last_acquisition_seconds);
+  document.querySelector('#last-acquisition-note').textContent = recorder.last_acquisition_at_utc
+    ? new Date(recorder.last_acquisition_at_utc).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')
+    : 'no completed observation';
+  return active;
+}
 function renderSensors(data, hardware) {
   const section = document.querySelector('#telemetry');
   section.hidden = !hardware;
@@ -97,11 +132,13 @@ function renderSensors(data, hardware) {
 }
 function render(data) {
   const hardware = data.mode === 'hardware-preview';
+  const recordingActive = renderRecorder(data);
   document.querySelector('#scenario-control').hidden = hardware;
-  document.querySelector('#banner-title').textContent = hardware ? 'HARDWARE PREVIEW — not recording' : 'DEMO — no cameras connected';
-  document.querySelector('#banner-detail').textContent = hardware ? 'Real camera frames. Software-parallel requests, synchronization unverified, and not saved as observations.' : 'All images and camera values are simulated. No scientific data is recorded.';
-  document.querySelector('#source-label').textContent = hardware ? 'Vimba X · real cameras' : 'Simulation';
-  document.querySelector('#channel-count').textContent = String(data.cameras.length).padStart(2, '0');
+  document.querySelector('#banner-title').textContent = recordingActive ? 'TIMED RAW RECORDING ACTIVE' : hardware ? 'HARDWARE PREVIEW — not recording' : 'DEMO — no cameras connected';
+  document.querySelector('#banner-detail').textContent = recordingActive ? 'Immutable Mono12 observation bundles are being scheduled independently. Software-parallel exposure synchronization is unverified.' : hardware ? 'Real camera frames. Software-parallel requests, synchronization unverified, and not saved as observations.' : 'All images and camera values are simulated. No scientific data is recorded.';
+  document.querySelector('#source-label').textContent = recordingActive ? 'Recorder owns cameras' : hardware ? 'Vimba X · real cameras' : 'Simulation';
+  const channelCount = Number.isInteger(data.configured_camera_count) ? data.configured_camera_count : data.cameras.length;
+  document.querySelector('#channel-count').textContent = String(channelCount).padStart(2, '0');
   document.querySelector('#footer-status').textContent = hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
   renderSensors(data, hardware);
   const currentIds = new Set(data.cameras.map(camera => camera.id));
@@ -137,6 +174,7 @@ function render(data) {
     overlay.textContent = camera.state === 'stale' ? 'Stale frame' : 'No current preview';
   });
   renderPolarization(data, hardware);
+  return recordingActive;
 }
 async function refresh() {
   const ticket = ++sequence;
@@ -150,11 +188,11 @@ async function refresh() {
     const data = await response.json();
     if (ticket !== sequence) return;
     if (!['demo', 'hardware-preview'].includes(data.mode) || !Array.isArray(data.cameras)) throw new Error('Invalid preview response');
-    if (data.error) throw new Error(data.error);
-    render(data);
+    const recordingActive = render(data);
+    if (data.error && !recordingActive) throw new Error(data.error);
     lastSuccess = Date.now();
     error.hidden = true;
-    document.querySelector('#connection').textContent = data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · software-parallel · synchronization unverified` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
+    document.querySelector('#connection').textContent = recordingActive ? 'Timed recorder owns the cameras · diagnostic previews may be unavailable' : data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · software-parallel · synchronization unverified` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
   } catch (_) {
     if (ticket === sequence) markUnavailable('Cannot reach the preview source. Displayed frames are no longer live. Reconnecting automatically…');
   } finally {

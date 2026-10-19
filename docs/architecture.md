@@ -6,7 +6,7 @@ snapshot. The dashboard binds only to loopback and reads that snapshot.
 
 | Package | Responsibility |
 | --- | --- |
-| acquisition | Lifecycle, cancellation, bounded storage retries; future scheduling |
+| acquisition | Lifecycle, UTC scheduling, parallel raw capture, bounded retries |
 | cameras | Camera contracts, demo source, and bounded Vimba diagnostic previews |
 | sensors | Timestamped contracts and bounded read-only BME280/EPEVER diagnostic producer |
 | calibration | Reserved for calibration loading and validation |
@@ -21,9 +21,8 @@ errors retry with capped exponential delay, and waits can be interrupted by
 SIGTERM. Invalid configuration fails startup. No data deletion or simulated
 observations occur. The health file can become stale when status writes fail.
 
-Still required for field operation: vendor-supported camera SDK operation on the
-target Pi, permanent network provisioning, measured synchronization, production
-acquisition, scientifically validated exposure control, hung-driver isolation,
+Still required for field operation: measured exposure synchronization,
+scientifically validated day/night exposure control, hung-driver isolation,
 watchdog integration,
 power-loss testing, storage endurance and capacity planning, backup monitoring,
 and long-duration soak testing. Restarting a crashed process does not detect all
@@ -37,10 +36,10 @@ laptop port 8080 to it. Acquisition must remain autonomous when the laptop,
 browser, dashboard process or tunnel disconnects.
 
 Dashboard views now include three diagnostic camera previews, exposure/gain
-readbacks, BME280 temperature/pressure/humidity, and selected EPEVER
-PV/battery/load/status telemetry. Future views include acquisition countdown,
-disk capacity, richer camera/network status and warnings. Hardware controls are
-not implemented by this scaffold.
+readbacks, BME280 temperature/pressure/humidity, selected EPEVER
+PV/battery/load/status telemetry, recorder state, and elapsed time since the last
+completed acquisition. Future views include disk capacity and richer
+camera/network warnings. Hardware controls are not implemented by the dashboard.
 Previews must be derived separately without modifying preserved raw images.
 Any future control API belongs behind the acquisition/controller boundary;
 the dashboard must never open camera or sensor devices directly. Today the
@@ -100,6 +99,32 @@ changes; it is not the validated exposure policy for scientific observations.
 Polarization processing remains in the producer, not the HTTP request handler.
 Only derived PNGs and explicit validity flags cross the atomic snapshot boundary.
 No raw image is altered or stored by this preview path.
+
+## Timed scientific observation recorder
+
+`polstation-observation-recorder` is a headless camera owner that schedules the
+next UTC wall-clock-aligned slot at the configured interval (600 seconds by
+default). It skips missed slots rather than creating a catch-up backlog. At a
+slot it requests all three Mono12 frames in software parallel, with one shared
+exposure, zero camera gain, gamma 1, camera auto-exposure disabled, and a
+commissioned per-camera GigE bandwidth limit. The configured exposure ceiling is
+120 seconds. Request times and spans are recorded, but this remains
+`software-parallel-unverified`, not validated simultaneous exposure.
+
+Each observation has a bounded number of attempts. Every returned raw buffer is
+persisted without pixel changes; `manifest.json` appears only after one attempt
+contains three complete Mono12 frames. Failed attempts and low-disk skips remain
+explicit, and the recorder never deletes existing data. The latest operational
+state is atomically replaced in `observation-recorder.json`; it is not an
+observation.
+
+The recorder conflicts with `polstation-camera-preview.service` because Vimba
+camera ownership is exclusive. The sensor producer and loopback dashboard may
+continue running, and the dashboard reports that the recorder owns the cameras.
+Consequently camera preview images can be stale or unavailable during a
+recording deployment. Closing the dashboard or SSH tunnel has no effect on the
+recorder. Fixed exposure is the safe default. Shared automatic exposure is
+implemented and bounded, but is explicitly unvalidated for scientific field use.
 
 ## Real-sensor diagnostic preview
 

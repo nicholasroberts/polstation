@@ -77,6 +77,7 @@ class DemoTests(unittest.TestCase):
         self.assertIn('Remote SkyPolStation', page)
         self.assertIn('Environment and power', page)
         self.assertIn('ROI focus', page)
+        self.assertIn('TIME SINCE ACQUISITION', page)
         assets = {}
         for asset in ('dashboard.css', 'dashboard.js'):
             with urlopen(base + '/static/' + asset) as response:
@@ -85,6 +86,7 @@ class DemoTests(unittest.TestCase):
         self.assertIn('Central circular ROI only · outside masked', assets['dashboard.js'])
         self.assertIn('software-parallel capture requests', assets['dashboard.js'])
         self.assertIn("camera.focus_metric", assets['dashboard.js'])
+        self.assertIn("time_since_last_acquisition_seconds", assets['dashboard.js'])
         with urlopen(base + '/api/previews?scenario=faults') as response:
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
             self.assertEqual(json.load(response)['cameras'][2]['state'], 'disconnected')
@@ -280,11 +282,26 @@ class DemoTests(unittest.TestCase):
                            'values': {'temperature_c': 18.2}},
                 'epever': {'state': 'unavailable', 'sampled_at_utc': None, 'values': {}}}}
             (Path(directory) / 'sensor-preview.json').write_text(json.dumps(sensors))
+            recorder = {
+                'mode': 'observation-recorder', 'state': 'waiting',
+                'updated_at_utc': '2000-01-01T00:00:00+00:00',
+                'last_acquisition_at_utc': '2000-01-01T00:00:00+00:00',
+                'next_acquisition_at_utc': '2999-01-01T00:00:00+00:00',
+            }
+            (Path(directory) / 'observation-recorder.json').write_text(json.dumps(recorder))
             snapshot = source.snapshot()
             self.assertFalse(snapshot['hardware_ready'])
             self.assertGreater(snapshot['cameras'][0]['age_seconds'], 0)
             self.assertEqual(snapshot['cameras'][0]['state'], 'stale')
             self.assertEqual(snapshot['sensors']['bme280']['state'], 'stale')
             self.assertEqual(snapshot['sensors']['epever']['state'], 'unavailable')
+            self.assertEqual(snapshot['recorder']['state'], 'stale')
+            self.assertEqual(snapshot['recorder']['reported_state'], 'waiting')
+            self.assertGreater(
+                snapshot['recorder']['time_since_last_acquisition_seconds'], 0
+            )
+            self.assertGreater(
+                snapshot['recorder']['time_until_next_acquisition_seconds'], 0
+            )
             with self.assertRaises(ValueError):
                 source.snapshot('faults')
