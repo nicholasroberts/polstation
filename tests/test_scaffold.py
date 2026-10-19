@@ -31,6 +31,7 @@ class ScaffoldTests(unittest.TestCase):
         load_config(ROOT / "config/example_field_config.yaml")
         legacy = copy.deepcopy(self.config)
         legacy.pop("camera_preview")
+        legacy.pop("observation_capture")
         for camera in legacy["cameras"]:
             camera.pop("preview_relative_gain")
         legacy_path = Path(self.tmp.name) / "legacy.yaml"
@@ -39,6 +40,10 @@ class ScaffoldTests(unittest.TestCase):
                          "shared_auto")
         self.assertIsNone(
             load_config(legacy_path)["camera_preview"]["stream_bytes_per_second"]
+        )
+        self.assertEqual(
+            load_config(legacy_path)["observation_capture"]["interval_seconds"],
+            600,
         )
         legacy_preview = copy.deepcopy(self.config)
         legacy_preview["camera_preview"].pop("stream_bytes_per_second")
@@ -77,6 +82,21 @@ class ScaffoldTests(unittest.TestCase):
             load_config(path)["camera_preview"]["stream_bytes_per_second"],
             30_000_000,
         )
+
+        for key, value in (
+            ("interval_seconds", 0),
+            ("maximum_capture_attempts", 1.5),
+            ("maximum_exposure_us", 120_000_001),
+            ("brightness_percentile", 101),
+            ("target_brightness_dn", 4096),
+            ("stream_bytes_per_second", 30_000_000.0),
+        ):
+            config = copy.deepcopy(self.config)
+            config["observation_capture"][key] = value
+            path = Path(self.tmp.name) / "bad-observation-capture.yaml"
+            path.write_text(yaml.safe_dump(config))
+            with self.assertRaises(ValueError):
+                load_config(path)
 
         for angles in ([0, 45, None], [0, 45, 135], [False, 45, 90]):
             config = copy.deepcopy(self.config)

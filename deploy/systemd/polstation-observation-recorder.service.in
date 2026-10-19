@@ -1,0 +1,29 @@
+# Replace @INSTALL_ROOT@ with the absolute installed release path.
+[Unit]
+Description=Polstation timed three-camera raw observation recorder
+After=local-fs.target network.target
+Conflicts=polstation-camera-preview.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=polstation
+Group=polstation
+WorkingDirectory=@INSTALL_ROOT@
+EnvironmentFile=/etc/polstation/vimbax.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-observation-recorder --config /etc/polstation/config.yaml
+Restart=always
+RestartSec=10
+TimeoutStopSec=150
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polstation/data /var/lib/polstation/state
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

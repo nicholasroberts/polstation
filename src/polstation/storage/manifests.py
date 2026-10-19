@@ -1,4 +1,4 @@
-"""Durable JSON publication primitives. Raw-image writing is not implemented."""
+"""Durable JSON publication primitives for state and observation metadata."""
 import hashlib
 import json
 import os

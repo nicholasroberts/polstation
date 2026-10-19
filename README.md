@@ -1,12 +1,15 @@
 # polstation
 
 Python scaffold for a Raspberry Pi 5 sky-polarization instrument intended for a
-year-long unattended deployment. **This is not field-ready software.** Its main
-acquisition process remains a scaffold and does not yet record images or operate
-sensors. A separate Pi-tested Vimba X diagnostic captures bounded Mono8 previews
+year-long unattended deployment. **This is not field-ready software.** A timed
+recorder now writes immutable three-camera Mono12 observation bundles on
+UTC-aligned slots, but its exposure policy, synchronization, power-loss behavior,
+storage endurance and long-duration recovery still require field validation. A
+separate Pi-tested Vimba X diagnostic captures bounded Mono8 previews
 and can calculate diagnostic DoLP/AoP previews, optionally using an explicitly
 identified provisional relative-sensitivity normalization. A separate read-only sensor
-diagnostic publishes BME280 and EPEVER telemetry; neither path is scientific acquisition.
+diagnostic publishes BME280 and EPEVER telemetry. Diagnostic previews are never
+scientific observations.
 
 Planned hardware: three Allied Vision Mako G-223B PoE cameras, a BME280 over I2C,
 and an EPEVER Tracer 2210AN over USB-RS485/Modbus RTU. Camera serials, polarizer
@@ -171,14 +174,29 @@ This remains a commissioning diagnostic. The BME280 is not field calibrated;
 MPPT quantities and counters have not been independently validated; and neither
 producer writes observations.
 
+## Timed raw observations
+
+`polstation-observation-recorder` schedules one three-camera observation every
+10 minutes by default and preserves original Mono12 buffers, hashes, effective
+configuration, camera settings, timestamps, sensor snapshot and provenance. It
+uses bounded software-parallel requests and explicitly records synchronization
+as unverified. Failed attempts remain on disk without a completion manifest, and
+the recorder never performs automatic raw-data deletion. Its replaceable status
+snapshot supplies the dashboard’s recorder state and “time since acquisition.”
+
+The recorder requires exclusive camera ownership and conflicts with the
+diagnostic camera-preview service. Its systemd unit is installed but not enabled
+by the standard preview deployment. Configure the measured safe GigE stream
+limit and follow [operations](docs/operations.md) before hardware testing.
+
 ## Repository and deployment
 
 Code lives under `src/polstation/`; `tests/` is hardware-independent.
 `deploy/systemd/` contains separate camera-preview, sensor-preview and dashboard
-units plus a target that manages the diagnostic stack as one operator action.
+units plus a target that manages the diagnostic stack as one operator action,
+and a separate timed-recorder unit requiring explicit commissioning.
 The units keep hardware access out of the web process, restart failed processes,
-and preserve the dashboard's loopback-only binding. They are distinct from the
-future scientific acquisition service.
+and preserve the dashboard's loopback-only binding.
 
 - [Architecture](docs/architecture.md)
 - [Lab dashboard quickstart](docs/quickstart.md)

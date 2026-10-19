@@ -11,6 +11,8 @@ sudo journalctl -u polstation-camera-preview -n 100 --no-pager
 sudo journalctl -u polstation-sensor-preview -n 100 --no-pager
 sudo journalctl -u polstation-acquisition -n 100 --no-pager
 sudo journalctl -u polstation-dashboard -n 100 --no-pager
+sudo systemctl status polstation-observation-recorder
+sudo journalctl -u polstation-observation-recorder -n 100 --no-pager
 ```
 
 `polstation-preview.target` starts and stops the three diagnostic processes as a
@@ -22,6 +24,48 @@ them. Stop the entire diagnostic stack cleanly with:
 ```sh
 sudo systemctl stop polstation-preview.target
 ```
+
+## Timed observation recording
+
+The recorder is deliberately not part of `polstation-preview.target` and is not
+enabled by the deployment instructions until real-camera commissioning is
+complete. Before its first start, set the measured safe
+`observation_capture.stream_bytes_per_second` value in the deployed configuration
+and validate it:
+
+```sh
+sudo -u polstation /opt/polstation/current/.venv/bin/polstation-check-config \
+  --config /etc/polstation/config.yaml
+sudo systemctl start polstation-observation-recorder.service
+```
+
+Starting the recorder stops the conflicting camera-preview service; the sensor
+producer and dashboard remain independent. Check its bounded state without
+opening camera hardware:
+
+```sh
+sudo -u polstation /opt/polstation/current/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+state = json.loads(Path('/var/lib/polstation/state/observation-recorder.json').read_text())
+for key in ('state', 'updated_at_utc', 'last_acquisition_at_utc',
+            'next_acquisition_at_utc', 'last_attempt_state', 'last_error'):
+    print(f'{key}: {state.get(key)}')
+PY
+```
+
+To return to diagnostic camera previews:
+
+```sh
+sudo systemctl stop polstation-observation-recorder.service
+sudo systemctl start polstation-camera-preview.service
+```
+
+Do not run the recorder and ad-hoc Vimba scripts simultaneously. A completed
+bundle has `manifest.json`; a directory with `failure.json` is a retained failed
+observation and must not be silently treated as complete. The dashboard’s “time
+since acquisition” is calculated from the recorder’s last completed manifest,
+not from a preview frame.
 
 Acquisition publishes health every 10 seconds by default. The dashboard reports
 it stale after 90 seconds. Low disk space reports `low_disk`; existing data is

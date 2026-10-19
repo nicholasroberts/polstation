@@ -137,6 +137,9 @@ for name in camera-preview sensor-preview dashboard; do
         "deploy/systemd/polstation-${name}.service.in" \
         | sudo tee "/etc/systemd/system/polstation-${name}.service" >/dev/null
 done
+sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' \
+    deploy/systemd/polstation-observation-recorder.service.in \
+    | sudo tee /etc/systemd/system/polstation-observation-recorder.service >/dev/null
 sudo install -o root -g root -m 0644 \
     deploy/systemd/polstation-preview.target \
     /etc/systemd/system/polstation-preview.target
@@ -144,6 +147,7 @@ sudo systemd-analyze verify \
     /etc/systemd/system/polstation-camera-preview.service \
     /etc/systemd/system/polstation-sensor-preview.service \
     /etc/systemd/system/polstation-dashboard.service \
+    /etc/systemd/system/polstation-observation-recorder.service \
     /etc/systemd/system/polstation-preview.target
 sudo systemctl daemon-reload
 sudo systemctl enable --now polstation-preview.target
@@ -158,12 +162,20 @@ sudo journalctl \
     -n 100 --no-pager
 ```
 
-The two producers can write only the replaceable state directory; the dashboard
-has read-only access. `SupplementaryGroups=i2c dialout` grants the sensor producer
-the permissions already verified during commissioning. Only the camera producer
-loads `/etc/polstation/vimbax.env`. The service account does not own or modify
-release code. This target runs diagnostics only and does not enable the scaffold
-acquisition service or record observations.
+The timed recorder unit is installed but deliberately not enabled here. It
+conflicts with the camera-preview service because both require exclusive camera
+ownership. Commission its Mono12 storage rate, 10-minute scheduling, exposure
+policy, and `observation_capture.stream_bytes_per_second` on the actual camera
+network before enabling it. See [operations](operations.md) for controlled start,
+status, and return-to-preview commands.
+
+The two diagnostic producers can write only the replaceable state directory; the
+dashboard has read-only access. The separately activated recorder can write the
+data and state roots. `SupplementaryGroups=i2c dialout` grants the sensor
+producer the permissions already verified during commissioning. The Vimba camera
+producer and recorder load `/etc/polstation/vimbax.env`. The service account does
+not own or modify release code. The preview target runs diagnostics only; it does
+not start the recorder.
 
 The NetworkManager hook above is specific to the commissioned temporary lab
 addressing described in the [Pi/Vimba X bring-up record](commissioning/2026-09-28-pi5-vimbax-camera-bring-up.md).

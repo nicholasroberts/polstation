@@ -18,6 +18,19 @@ camera_preview:
   target_brightness_dn: 180
   brightness_tolerance_dn: 10
   maximum_step_factor: 2
+observation_capture:
+  interval_seconds: 600
+  exposure_mode: fixed
+  initial_exposure_us: 15000
+  minimum_exposure_us: 100
+  maximum_exposure_us: 120000000
+  brightness_percentile: 99
+  target_brightness_dn: 2880
+  brightness_tolerance_dn: 160
+  maximum_step_factor: 2
+  timeout_margin_seconds: 10
+  maximum_capture_attempts: 3
+  stream_bytes_per_second: null  # Replace only with a measured field-network value.
 polarization_preview:
   instrument_matrix: null  # Optional provisional diagnostic calibration; see docs/calibration.md.
 cameras:

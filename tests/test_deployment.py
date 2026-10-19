@@ -72,6 +72,23 @@ class DeploymentTests(unittest.TestCase):
             hook.index("address add 169.254.68.1/16"),
         )
 
+    def test_observation_recorder_owns_cameras_and_writes_only_data_and_state(self):
+        recorder = self.read("polstation-observation-recorder.service.in")
+        self.assertIn("User=polstation", recorder)
+        self.assertIn("EnvironmentFile=/etc/polstation/vimbax.env", recorder)
+        self.assertIn("polstation-observation-recorder", recorder)
+        self.assertIn("Conflicts=polstation-camera-preview.service", recorder)
+        self.assertIn(
+            "ReadWritePaths=/var/lib/polstation/data /var/lib/polstation/state",
+            recorder,
+        )
+        self.assertIn("TimeoutStopSec=150", recorder)
+        self.assertNotIn("PartOf=polstation-preview.target", recorder)
+        self.assertNotIn(
+            "polstation-observation-recorder.service",
+            self.read("polstation-preview.target"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

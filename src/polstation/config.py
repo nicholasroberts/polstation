@@ -19,6 +19,21 @@ DEFAULT_CAMERA_PREVIEW = {
 
 DEFAULT_POLARIZATION_PREVIEW = {"instrument_matrix": None}
 
+DEFAULT_OBSERVATION_CAPTURE = {
+    "interval_seconds": 600,
+    "exposure_mode": "fixed",
+    "initial_exposure_us": 15000,
+    "minimum_exposure_us": 100,
+    "maximum_exposure_us": 120000000,
+    "brightness_percentile": 99,
+    "target_brightness_dn": 2880,
+    "brightness_tolerance_dn": 160,
+    "maximum_step_factor": 2,
+    "timeout_margin_seconds": 10,
+    "maximum_capture_attempts": 3,
+    "stream_bytes_per_second": None,
+}
+
 
 def positive(value, name):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -86,6 +101,59 @@ def load_config(path):
         raise ValueError("camera preview brightness tolerance must be below its target")
     if camera_preview["maximum_step_factor"] <= 1:
         raise ValueError("camera preview maximum step factor must exceed one")
+    observation_capture = config.setdefault(
+        "observation_capture", DEFAULT_OBSERVATION_CAPTURE.copy()
+    )
+    if not isinstance(observation_capture, dict):
+        raise ValueError("observation_capture must be a mapping")
+    for name, value in DEFAULT_OBSERVATION_CAPTURE.items():
+        observation_capture.setdefault(name, value)
+    if observation_capture["exposure_mode"] not in ("fixed", "shared_auto"):
+        raise ValueError(
+            "observation capture exposure_mode must be fixed or shared_auto"
+        )
+    for name in (
+        "initial_exposure_us", "minimum_exposure_us", "maximum_exposure_us",
+        "brightness_percentile", "target_brightness_dn", "maximum_step_factor",
+        "timeout_margin_seconds",
+    ):
+        positive(observation_capture[name], f"observation_capture.{name}")
+    for name in ("interval_seconds", "maximum_capture_attempts"):
+        value = observation_capture[name]
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"observation_capture.{name} must be a positive integer")
+    if not (
+        observation_capture["minimum_exposure_us"]
+        <= observation_capture["initial_exposure_us"]
+        <= observation_capture["maximum_exposure_us"]
+    ):
+        raise ValueError(
+            "observation capture initial exposure must be within its limits"
+        )
+    if observation_capture["maximum_exposure_us"] > 120_000_000:
+        raise ValueError("observation capture maximum exposure must not exceed 120 seconds")
+    if observation_capture["brightness_percentile"] > 100:
+        raise ValueError("observation capture brightness percentile must not exceed 100")
+    if observation_capture["target_brightness_dn"] > 4095:
+        raise ValueError("observation capture target brightness must not exceed 4095 DN")
+    tolerance = observation_capture["brightness_tolerance_dn"]
+    if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
+            or not math.isfinite(tolerance) or tolerance < 0):
+        raise ValueError(
+            "observation_capture.brightness_tolerance_dn must be finite and nonnegative"
+        )
+    if tolerance >= observation_capture["target_brightness_dn"]:
+        raise ValueError(
+            "observation capture brightness tolerance must be below its target"
+        )
+    if observation_capture["maximum_step_factor"] <= 1:
+        raise ValueError("observation capture maximum step factor must exceed one")
+    stream_limit = observation_capture["stream_bytes_per_second"]
+    if (stream_limit is not None
+            and (type(stream_limit) is not int or stream_limit <= 0)):
+        raise ValueError(
+            "observation_capture.stream_bytes_per_second must be a positive integer or null"
+        )
     polarization_preview = config.setdefault(
         "polarization_preview", DEFAULT_POLARIZATION_PREVIEW.copy()
     )
