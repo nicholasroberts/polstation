@@ -39,9 +39,11 @@ sudo -u polstation /opt/polstation/current/.venv/bin/polstation-check-config \
 sudo systemctl start polstation-observation-recorder.service
 ```
 
-Starting the recorder stops the conflicting camera-preview service; the sensor
-producer and dashboard remain independent. Check its bounded state without
-opening camera hardware:
+Starting the recorder stops the conflicting camera-preview service; an explicit
+systemd ordering dependency completes that stop before the recorder opens Vimba.
+This prevents the recorder from racing the preview for exclusive camera access.
+The sensor producer and dashboard remain independent. Check the recorder's
+bounded state without opening camera hardware:
 
 ```sh
 sudo -u polstation /opt/polstation/current/.venv/bin/python - <<'PY'

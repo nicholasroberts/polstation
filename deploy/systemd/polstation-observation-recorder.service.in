@@ -1,7 +1,7 @@
 # Replace @INSTALL_ROOT@ with the absolute installed release path.
 [Unit]
 Description=Polstation timed three-camera raw observation recorder
-After=local-fs.target network.target
+After=local-fs.target network.target polstation-camera-preview.service
 Conflicts=polstation-camera-preview.service
 StartLimitIntervalSec=0
 

@@ -79,6 +79,10 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("polstation-observation-recorder", recorder)
         self.assertIn("Conflicts=polstation-camera-preview.service", recorder)
         self.assertIn(
+            "After=local-fs.target network.target polstation-camera-preview.service",
+            recorder,
+        )
+        self.assertIn(
             "ReadWritePaths=/var/lib/polstation/data /var/lib/polstation/state",
             recorder,
         )
