@@ -34,17 +34,20 @@ by a process exit with `SIGSEGV`. The configured systemd restart recovered ten
 seconds later and the scheduled observation completed, but crash recovery is not
 an acceptable normal handover path.
 
-The recorder unit already declared
+The recorder unit originally declared
 `Conflicts=polstation-camera-preview.service`, but `Conflicts=` alone does not
 order the stop and start jobs. The unit now also orders itself relative to the
 camera-preview service so systemd completes the conflicting stop before starting
-the recorder. This change is covered by a deployment regression test and still
-requires a repeat Pi handover test before enabling the recorder at boot.
+the recorder. This change is covered by a deployment regression test.
+
+Release `ea58084` then passed the repeat Pi handover test. The journal showed the
+camera-preview service fully deactivated before the recorder was started. The
+recorder opened all cameras, published `waiting` for the 13:50 UTC slot, and
+reported `NRestarts=0`, `Result=success`, and no error. There was no Vimba access
+failure, segmentation fault, or recovery restart.
 
 ## Remaining boundaries
 
-- Validate the corrected recorder/preview handover on the Pi without an access
-  error, process restart, or Vimba crash.
 - Decide and commission the field exposure-control policy; fixed 15 ms is only
   suitable for this test and shared automatic exposure remains scientifically
   unvalidated.
