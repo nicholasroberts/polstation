@@ -1,11 +1,13 @@
 """Preview-only three-angle Stokes calculation and fixed colour scales."""
 
+from array import array
 import binascii
 from functools import cache
 from importlib.resources import files
 import json
 import math
 import struct
+import sys
 import zlib
 
 
@@ -30,6 +32,36 @@ def sample_mono8(buffer, width, height, *, max_width=640, max_height=400):
         row = pixels[y * width:y * width + width:step]
         sampled[offset:offset + sampled_width] = row
         offset += sampled_width
+    return sampled_width, sampled_height, bytes(sampled)
+
+
+def sample_mono12(buffer, width, height, *, max_width=640, max_height=400):
+    """Reduce little-endian Mono12-in-16-bit data to a bounded 8-bit preview."""
+    if width <= 0 or height <= 0:
+        raise ValueError("frame dimensions must be positive")
+    expected_bytes = width * height * 2
+    if len(buffer) != expected_bytes:
+        raise ValueError(
+            f"Mono12 buffer length {len(buffer)} does not match {width}x{height}"
+        )
+    pixels = array("H")
+    pixels.frombytes(buffer)
+    if sys.byteorder != "little":
+        pixels.byteswap()
+    step = max(
+        1,
+        (width + max_width - 1) // max_width,
+        (height + max_height - 1) // max_height,
+    )
+    sampled_width = (width + step - 1) // step
+    sampled_height = (height + step - 1) // step
+    sampled = bytearray(sampled_width * sampled_height)
+    offset = 0
+    for y in range(0, height, step):
+        row_start = y * width
+        for x in range(0, width, step):
+            sampled[offset] = (pixels[row_start + x] & 0x0FFF) >> 4
+            offset += 1
     return sampled_width, sampled_height, bytes(sampled)
 
 

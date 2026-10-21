@@ -1,4 +1,5 @@
 """Check preview isolation, fault semantics and the actual HTTP boundary."""
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import struct
@@ -20,7 +21,7 @@ from polstation.cameras.preview import (
     _polarization_snapshot,
     mono8_preview_png,
 )
-from polstation.polarization.preview import central_circular_roi
+from polstation.polarization.preview import central_circular_roi, sample_mono12
 from polstation.config import load_config
 from polstation.web.app import make_handler
 
@@ -87,6 +88,7 @@ class DemoTests(unittest.TestCase):
         self.assertIn('software-parallel capture requests', assets['dashboard.js'])
         self.assertIn("camera.focus_metric", assets['dashboard.js'])
         self.assertIn("time_since_last_acquisition_seconds", assets['dashboard.js'])
+        self.assertIn("Latest completed observation", assets['dashboard.js'])
         with urlopen(base + '/api/previews?scenario=faults') as response:
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
             self.assertEqual(json.load(response)['cameras'][2]['state'], 'disconnected')
@@ -107,6 +109,14 @@ class DemoTests(unittest.TestCase):
         image = mono8_preview_png(bytes(range(24)), 6, 4, max_width=3, max_height=2)
         self.assertEqual(image[:8], b'\x89PNG\r\n\x1a\n')
         self.assertEqual(struct.unpack('>II', image[16:24]), (3, 2))
+
+    def test_mono12_recording_preview_is_bounded_and_scaled(self):
+        payload = struct.pack("<24H", *(index << 6 for index in range(24)))
+        width, height, pixels = sample_mono12(
+            payload, 6, 4, max_width=3, max_height=2
+        )
+        self.assertEqual((width, height), (3, 2))
+        self.assertEqual(pixels, bytes([0, 8, 16, 48, 56, 64]))
 
     def test_preview_brightness_percentile_uses_nearest_rank(self):
         self.assertEqual(_percentile_dn(bytes([0, 10, 20, 255]), 50), 10)
@@ -305,3 +315,34 @@ class DemoTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 source.snapshot('faults')
+
+    def test_file_preview_source_uses_recorded_images_while_recorder_owns_cameras(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.config['storage']['state_root'] = directory
+            source = FilePreviewSource(self.config)
+            now = datetime.now(timezone.utc).isoformat()
+            (Path(directory) / 'observation-recorder.json').write_text(json.dumps({
+                'mode': 'observation-recorder', 'state': 'waiting',
+                'updated_at_utc': now, 'last_acquisition_at_utc': now,
+                'next_acquisition_at_utc': None, 'last_attempt_state': 'complete',
+                'config_sha256': 'matching-config',
+            }))
+            (Path(directory) / 'observation-preview.json').write_text(json.dumps({
+                'mode': 'recorded-observation-preview',
+                'observation_id': 'obs-recorded',
+                'observation_relative_path': '2026/10/20/obs-recorded',
+                'config_sha256': 'matching-config',
+                'cameras': [
+                    {'id': camera['id'], 'state': 'recorded',
+                     'captured_at_utc': now, 'preview_png': 'encoded'}
+                    for camera in self.config['cameras']
+                ],
+                'polarization': {'state': 'recorded'},
+            }))
+            snapshot = source.snapshot()
+            self.assertTrue(snapshot['recording'])
+            self.assertFalse(snapshot['hardware_ready'])
+            self.assertEqual(snapshot['preview_source'], 'latest-recorded-observation')
+            self.assertEqual(snapshot['cameras'][0]['state'], 'recorded')
+            self.assertEqual(snapshot['polarization']['state'], 'recorded')
+            self.assertEqual(snapshot['recorded_observation_id'], 'obs-recorded')

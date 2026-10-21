@@ -86,3 +86,49 @@ Test disk-full behavior, corrupted status, disconnected hardware, power loss,
 clock changes, restarts and restore from backup. Protect raw data and calibration
 assets with a separately verified backup process. Do not enable retention-based
 raw-data deletion without an explicit scientific policy.
+
+## Download recorded data
+
+Find the most recent completed observation on the Pi from recorder state rather
+than guessing a directory name:
+
+```sh
+latest=$(
+  sudo -u polstation /opt/polstation/current/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+state = json.loads(Path('/var/lib/polstation/state/observation-recorder.json').read_text())
+path = state.get('last_observation_relative_path')
+if not path:
+    raise SystemExit('no completed observation is recorded')
+print(path)
+PY
+)
+echo "$latest"
+sudo -u polstation test -f "/var/lib/polstation/data/$latest/manifest.json"
+```
+
+The data tree is deliberately private to the service account. To download one
+bundle, make a temporary operator-owned archive without changing or deleting the
+scientific source:
+
+```sh
+archive="/tmp/$(basename "$latest").tar.gz"
+sudo tar -C /var/lib/polstation/data -czf "$archive" "$latest"
+sudo chown admin:admin "$archive"
+sha256sum "$archive"
+echo "$archive"
+```
+
+Then, on the laptop:
+
+```sh
+scp admin@polstation.local:/tmp/obs-<UTC-time>-<unique-id>.tar.gz "$HOME/Downloads/"
+shasum -a 256 "$HOME/Downloads/obs-<UTC-time>-<unique-id>.tar.gz"
+```
+
+Compare the laptop archive hash with the Pi output before removing only the
+temporary `/tmp` archive. Extract the copy and retain `manifest.json`,
+`config.json`, and every `raw/*.mono12.raw` file together. For multi-day bulk
+transfer, commission a destination filesystem, verified resumable transfer and
+backup policy rather than staging a large duplicate under `/tmp`.

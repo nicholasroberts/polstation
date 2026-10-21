@@ -1,6 +1,7 @@
 """Timed, immutable three-camera Mono12 observation recording."""
 import argparse
 from array import array
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import datetime, timezone
@@ -16,9 +17,20 @@ import sys
 import threading
 import uuid
 
-from polstation.cameras.preview import _feature, _parallel_camera_calls, _read_feature
+from polstation.cameras.preview import (
+    _feature,
+    _focus_metric,
+    _parallel_camera_calls,
+    _polarization_snapshot,
+    _read_feature,
+)
 from polstation.config import load_config
 from polstation.logging.setup import configure
+from polstation.polarization.preview import (
+    central_circular_roi,
+    encode_png,
+    sample_mono12,
+)
 from polstation.storage.layout import free_bytes, prepare
 from polstation.storage.manifests import config_digest, write_json
 
@@ -324,6 +336,87 @@ def record_observation(config, capture_attempt, exposure_us, *,
     }
 
 
+def _publish_recorded_preview(config, result):
+    """Publish bounded diagnostic images derived from one completed raw bundle."""
+    observation = result["path"]
+    manifest = result["manifest"]
+    frames = manifest["capture"]["frames"]
+    frames_by_id = {frame["camera_id"]: frame for frame in frames}
+    sampled = {}
+    cameras = []
+    relative_observation = str(observation.relative_to(config["storage"]["data_root"]))
+
+    for camera_config in config["cameras"]:
+        camera_id = camera_config["id"]
+        frame = frames_by_id[camera_id]
+        payload = (observation / frame["relative_path"]).read_bytes()
+        width, height, pixels = sample_mono12(
+            payload, frame["width"], frame["height"]
+        )
+        sampled[camera_id] = (width, height, pixels)
+        roi_mask, roi = central_circular_roi(width, height)
+        try:
+            focus_metric = _focus_metric(pixels, width, height, roi_mask)
+        except ValueError:
+            focus_metric = None
+        cameras.append({
+            "id": camera_id,
+            "model": frame.get("model") or camera_config["model"],
+            "state": "recorded",
+            "simulated": False,
+            "frame_number": frame.get("frame_id"),
+            "captured_at_utc": frame.get("capture_completed_at_utc"),
+            "capture_request_at_utc": frame.get("capture_request_at_utc"),
+            "capture_completed_at_utc": frame.get("capture_completed_at_utc"),
+            "age_seconds": 0.0,
+            "exposure_us": frame.get("exposure_readback_us"),
+            "gain_db": frame.get("gain_db"),
+            "focus_metric": focus_metric,
+            "focus_metric_method": (
+                "central-ROI variance of 4-neighbour Laplacian on diagnostic "
+                "Mono12-to-Mono8 rendering (DN^2)"
+            ),
+            "focus_roi": roi,
+            "pixel_format": "Mono12 (diagnostic 8-bit rendering)",
+            "device_timestamp": frame.get("device_timestamp"),
+            "preview_png": base64.b64encode(
+                encode_png(pixels, width, height)
+            ).decode("ascii"),
+            "source_observation_id": manifest["observation_id"],
+            "source_observation_relative_path": relative_observation,
+            "source_raw_relative_path": frame["relative_path"],
+            "source_raw_sha256": frame["sha256"],
+        })
+
+    polarization = _polarization_snapshot(
+        config,
+        sampled,
+        manifest["capture"]["exposure_requested_us"],
+    )
+    if polarization.get("state") == "live":
+        polarization["state"] = "recorded"
+    polarization.update({
+        "source_observation_id": manifest["observation_id"],
+        "source_observation_relative_path": relative_observation,
+        "diagnostic_only": True,
+    })
+    output = Path(config["storage"]["state_root"]) / "observation-preview.json"
+    write_json(output, {
+        "schema_version": 1,
+        "mode": "recorded-observation-preview",
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "observation_id": manifest["observation_id"],
+        "observation_relative_path": relative_observation,
+        "observation_completed_at_utc": manifest["completed_at_utc"],
+        "config_sha256": manifest["config_sha256"],
+        "provenance": manifest["provenance"],
+        "diagnostic_only": True,
+        "raw_files_unchanged": True,
+        "cameras": cameras,
+        "polarization": polarization,
+    }, replace=True)
+
+
 class VmbMono12Recorder:
     """Own and configure the three Vimba cameras for timed raw capture."""
 
@@ -566,6 +659,13 @@ def run(config, stop, *, once=False, recorder_factory=VmbMono12Recorder):
                         config, recorder.capture_attempt, exposure_us,
                         scheduled_for_utc=scheduled,
                     )
+                    try:
+                        _publish_recorded_preview(config, result)
+                    except Exception:
+                        logger.exception(
+                            "Could not publish diagnostic preview for completed observation %s",
+                            result["manifest"]["observation_id"],
+                        )
                     exposure_us = result["next_exposure_us"]
                     manifest = result["manifest"]
                     retained = {

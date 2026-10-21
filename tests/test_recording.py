@@ -136,6 +136,10 @@ class RecordingTests(unittest.TestCase):
 
     def test_once_run_publishes_completed_recorder_state(self):
         capture = self.capture
+        for camera, angle in zip(self.config["cameras"], (0, 45, 90)):
+            camera["polarizer_angle_deg"] = angle
+            camera["preview_relative_gain"] = 1.0
+        self.config["provenance"]["calibration_id"] = "test-relative-gains"
 
         class FakeRecorder:
             def __enter__(self):
@@ -164,6 +168,24 @@ class RecordingTests(unittest.TestCase):
             "last_observation_relative_path"
         ]
         self.assertTrue((observation / "manifest.json").is_file())
+        preview = json.loads(
+            (Path(self.config["storage"]["state_root"]) /
+             "observation-preview.json").read_text()
+        )
+        self.assertEqual(preview["mode"], "recorded-observation-preview")
+        self.assertEqual(preview["observation_id"], state["last_observation_id"])
+        self.assertTrue(preview["diagnostic_only"])
+        self.assertTrue(preview["raw_files_unchanged"])
+        self.assertEqual(
+            [camera["state"] for camera in preview["cameras"]],
+            ["recorded", "recorded", "recorded"],
+        )
+        self.assertTrue(all(camera["preview_png"] for camera in preview["cameras"]))
+        self.assertEqual(preview["polarization"]["state"], "recorded")
+        self.assertEqual(
+            preview["polarization"]["source_observation_id"],
+            state["last_observation_id"],
+        )
 
 
 if __name__ == "__main__":

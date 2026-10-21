@@ -23,14 +23,16 @@ function renderPolarization(data, hardware) {
   section.hidden = !hardware;
   if (!hardware) return;
   const polarization = data.polarization || {state: 'unavailable', error: 'No polarization preview received'};
-  const live = polarization.state === 'live';
+  const displayable = ['live', 'recorded'].includes(polarization.state);
+  const recorded = polarization.state === 'recorded';
   const warning = document.querySelector('#polarization-warning');
-  warning.textContent = polarization.correction_method === 'provisional_instrument_matrix'
+  const sourceWarning = recorded ? 'Latest completed raw observation · diagnostic rendering only · ' : '';
+  warning.textContent = sourceWarning + (polarization.correction_method === 'provisional_instrument_matrix'
     ? `Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · provisional instrument matrix (${polarization.calibration_id || 'calibration ID unavailable'}) · bounded scalar dark model · per-pixel dark/flat uncorrected`
     : polarization.relative_sensitivity_corrected
       ? `Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · relative sensitivity normalized (${polarization.calibration_id || 'calibration ID unavailable'}) · dark/flat uncorrected`
-      : 'Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · radiometrically uncalibrated';
-  document.querySelector('#polarization-status').textContent = live ? 'Diagnostic maps updating' : polarization.state === 'stale' ? 'Derived maps are stale' : polarization.error || 'Derived maps unavailable';
+      : 'Central circular ROI only · outside masked · software-parallel capture requests · exposure synchronization unverified · spatially unregistered · radiometrically uncalibrated');
+  document.querySelector('#polarization-status').textContent = recorded ? 'Latest recorded diagnostic maps' : polarization.state === 'live' ? 'Diagnostic maps updating' : polarization.state === 'stale' ? 'Derived maps are stale' : polarization.error || 'Derived maps unavailable';
   for (const [kind, label] of [['dolp', 'DoLP'], ['aop', 'AoP']]) {
     const image = document.querySelector(`#${kind}-preview`);
     const legend = document.querySelector(`#${kind}-legend`);
@@ -43,7 +45,7 @@ function renderPolarization(data, hardware) {
     image.hidden = !preview;
     legend.hidden = !scale;
     const overlay = image.parentElement.querySelector('.derived-overlay');
-    overlay.hidden = live;
+    overlay.hidden = displayable;
     overlay.textContent = polarization.state === 'stale' ? `${label} preview is stale` : `${label} unavailable · ${polarization.error || 'waiting for configured camera frames'}`;
   }
 }
@@ -133,13 +135,16 @@ function renderSensors(data, hardware) {
 function render(data) {
   const hardware = data.mode === 'hardware-preview';
   const recordingActive = renderRecorder(data);
+  const recordedPreview = data.preview_source === 'latest-recorded-observation';
   document.querySelector('#scenario-control').hidden = hardware;
   document.querySelector('#banner-title').textContent = recordingActive ? 'TIMED RAW RECORDING ACTIVE' : hardware ? 'HARDWARE PREVIEW — not recording' : 'DEMO — no cameras connected';
   document.querySelector('#banner-detail').textContent = recordingActive ? 'Immutable Mono12 observation bundles are being scheduled independently. Software-parallel exposure synchronization is unverified.' : hardware ? 'Real camera frames. Software-parallel requests, synchronization unverified, and not saved as observations.' : 'All images and camera values are simulated. No scientific data is recorded.';
-  document.querySelector('#source-label').textContent = recordingActive ? 'Recorder owns cameras' : hardware ? 'Vimba X · real cameras' : 'Simulation';
+  document.querySelector('#source-label').textContent = recordedPreview ? 'Latest recorded observation' : recordingActive ? 'Recorder owns cameras' : hardware ? 'Vimba X · real cameras' : 'Simulation';
   const channelCount = Number.isInteger(data.configured_camera_count) ? data.configured_camera_count : data.cameras.length;
   document.querySelector('#channel-count').textContent = String(channelCount).padStart(2, '0');
-  document.querySelector('#footer-status').textContent = hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
+  document.querySelector('#footer-status').textContent = recordedPreview
+    ? 'Allied Vision Mako G-223B × 3 · latest recorded diagnostic'
+    : hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
   renderSensors(data, hardware);
   const currentIds = new Set(data.cameras.map(camera => camera.id));
   cards.forEach((card, id) => { if (!currentIds.has(id)) { card.remove(); cards.delete(id); } });
@@ -153,7 +158,7 @@ function render(data) {
     card.dataset.state = camera.state;
     card.querySelector('.channel').textContent = `CHANNEL ${String(index + 1).padStart(2, '0')}`;
     card.querySelector('h3').textContent = camera.id.replaceAll('_', ' ');
-    card.querySelector('.badge').textContent = camera.state === 'live' ? `● Live${camera.simulated ? ' · demo' : ''}` : camera.state === 'stale' ? `Stale${camera.simulated ? ' · demo' : ''}` : 'Disconnected';
+    card.querySelector('.badge').textContent = camera.state === 'live' ? `● Live${camera.simulated ? ' · demo' : ''}` : camera.state === 'recorded' ? 'Recorded' : camera.state === 'stale' ? `Stale${camera.simulated ? ' · demo' : ''}` : 'Disconnected';
     card.querySelector('.model').textContent = `${camera.model}${camera.simulated ? ' · simulated source' : ` · ${camera.pixel_format || 'format unknown'}`}`;
     card.querySelector('.exposure').textContent = Number.isFinite(camera.exposure_us) ? `${(camera.exposure_us / 1000).toFixed(1)} ms` : '—';
     card.querySelector('.gain').textContent = Number.isFinite(camera.gain_db) ? `${camera.gain_db.toFixed(1)} dB` : '—';
@@ -170,11 +175,11 @@ function render(data) {
     img.hidden = !preview;
     img.style.display = preview ? 'block' : 'none';
     const overlay = card.querySelector('.overlay');
-    overlay.hidden = camera.state === 'live';
+    overlay.hidden = ['live', 'recorded'].includes(camera.state);
     overlay.textContent = camera.state === 'stale' ? 'Stale frame' : 'No current preview';
   });
   renderPolarization(data, hardware);
-  return recordingActive;
+  return {recordingActive, recordedPreview};
 }
 async function refresh() {
   const ticket = ++sequence;
@@ -188,11 +193,13 @@ async function refresh() {
     const data = await response.json();
     if (ticket !== sequence) return;
     if (!['demo', 'hardware-preview'].includes(data.mode) || !Array.isArray(data.cameras)) throw new Error('Invalid preview response');
-    const recordingActive = render(data);
+    const {recordingActive, recordedPreview} = render(data);
     if (data.error && !recordingActive) throw new Error(data.error);
     lastSuccess = Date.now();
     error.hidden = true;
-    document.querySelector('#connection').textContent = recordingActive ? 'Timed recorder owns the cameras · diagnostic previews may be unavailable' : data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · software-parallel · synchronization unverified` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
+    document.querySelector('#connection').textContent = recordedPreview
+      ? `Latest completed observation · /var/lib/polstation/data/${data.recorded_observation_relative_path}`
+      : recordingActive ? 'Timed recorder owns the cameras · waiting for the first completed observation preview' : data.mode === 'hardware-preview' ? `${data.cameras.length} real camera previews · software-parallel · synchronization unverified` : scenario.value === 'live' ? 'Three simulated feeds · refreshing every second' : 'Fault demonstration · camera 2 frozen, camera 3 disconnected';
   } catch (_) {
     if (ticket === sequence) markUnavailable('Cannot reach the preview source. Displayed frames are no longer live. Reconnecting automatically…');
   } finally {

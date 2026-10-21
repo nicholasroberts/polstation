@@ -57,3 +57,31 @@ The replaceable `observation-recorder.json` file in the state root is operationa
 status, not scientific data. The dashboard uses it for recorder state, last
 completed acquisition and next scheduled acquisition. The scientific record is
 only a bundle with its immutable `manifest.json` and referenced raw files.
+
+After a bundle is complete, the recorder also atomically replaces
+`/var/lib/polstation/state/observation-preview.json`. This bounded diagnostic
+snapshot contains downsampled 8-bit PNG renderings of the three latest recorded
+Mono12 frames plus diagnostic DoLP and AoP maps. It identifies the source
+observation, raw paths, hashes, configuration digest and calibration provenance.
+It is explicitly marked `diagnostic_only`; it is not an observation, is not a
+substitute for the raw files, and may be replaced by the next acquisition. The
+immutable raw buffers are never modified while producing it.
+
+## Deployed paths and retrieval
+
+The commissioned Pi stores scientific bundles below:
+
+```text
+/var/lib/polstation/data/YYYY/MM/DD/obs-<UTC-time>-<unique-id>/
+```
+
+Replaceable service and dashboard state is below
+`/var/lib/polstation/state/`; it is operational metadata rather than the
+scientific archive. Configuration is `/etc/polstation/config.yaml`, while the
+active release symlink is `/opt/polstation/current`.
+
+Use `manifest.json` as the completion marker and inventory. It contains the
+relative raw filenames, byte counts and SHA-256 hashes needed to verify a copied
+bundle. Never infer completeness merely from the presence of a directory or raw
+file. Retrieval commands and their permission-safe staging procedure are in
+[operations](operations.md#download-recorded-data).

@@ -183,6 +183,11 @@ uses bounded software-parallel requests and explicitly records synchronization
 as unverified. Failed attempts remain on disk without a completion manifest, and
 the recorder never performs automatic raw-data deletion. Its replaceable status
 snapshot supplies the dashboard’s recorder state and “time since acquisition.”
+After each completed bundle it also publishes a bounded diagnostic snapshot of
+the three recorded frames and DoLP/AoP maps. While the recorder owns the cameras,
+the dashboard labels and displays these as recorded—not live—and shows their
+source path under `/var/lib/polstation/data`. The diagnostic PNGs are replaceable
+state; only the immutable Mono12 bundle is the observation.
 
 The recorder requires exclusive camera ownership and conflicts with the
 diagnostic camera-preview service. Its systemd unit is installed but not enabled

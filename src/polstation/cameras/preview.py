@@ -303,7 +303,11 @@ class FilePreviewSource:
         self.path = Path(config["storage"]["state_root"]) / "camera-previews.json"
         self.sensor_path = Path(config["storage"]["state_root"]) / "sensor-preview.json"
         self.recorder_path = Path(config["storage"]["state_root"]) / "observation-recorder.json"
+        self.recorded_preview_path = (
+            Path(config["storage"]["state_root"]) / "observation-preview.json"
+        )
         self.configured_camera_count = len(config["cameras"])
+        self.configured_camera_ids = {camera["id"] for camera in config["cameras"]}
         self.stale_after_seconds = config["dashboard"]["stale_after_seconds"]
 
     def _sensor_snapshot(self, now):
@@ -361,14 +365,36 @@ class FilePreviewSource:
                 "last_error": str(error),
             }
 
+    def _recorded_preview_snapshot(self, now):
+        try:
+            value = json.loads(self.recorded_preview_path.read_text())
+            if (value.get("mode") != "recorded-observation-preview"
+                    or not isinstance(value.get("cameras"), list)
+                    or not isinstance(value.get("polarization"), dict)):
+                raise ValueError("invalid recorded-observation preview snapshot")
+            camera_ids = [camera.get("id") for camera in value["cameras"]]
+            if (len(camera_ids) != self.configured_camera_count
+                    or len(set(camera_ids)) != len(camera_ids)
+                    or set(camera_ids) != self.configured_camera_ids):
+                raise ValueError("recorded preview camera identities do not match configuration")
+            for camera in value["cameras"]:
+                captured = camera.get("captured_at_utc")
+                camera["age_seconds"] = max(
+                    0.0, (now - datetime.fromisoformat(captured)).total_seconds()
+                ) if captured else None
+            return value
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return None
+
     def snapshot(self, scenario="live"):
         if scenario != "live":
             raise ValueError("hardware preview has no simulated fault scenarios")
+        now = datetime.now(timezone.utc)
+        recorder = self._recorder_snapshot(now)
         try:
             value = json.loads(self.path.read_text())
             if value.get("mode") != self.mode or not isinstance(value.get("cameras"), list):
                 raise ValueError("invalid preview snapshot")
-            now = datetime.now(timezone.utc)
             for camera in value["cameras"]:
                 captured = camera.get("captured_at_utc")
                 camera["age_seconds"] = max(0.0, (now - datetime.fromisoformat(captured)).total_seconds()) if captured else None
@@ -378,19 +404,41 @@ class FilePreviewSource:
                 camera["state"] == "live" for camera in value["cameras"]
             )
             value["configured_camera_count"] = self.configured_camera_count
-            if not value["hardware_ready"] and value.get("polarization", {}).get("state") == "live":
-                value["polarization"]["state"] = "stale"
-            value["sensors"] = self._sensor_snapshot(now)
-            value["recorder"] = self._recorder_snapshot(now)
-            return value
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
-            now = datetime.now(timezone.utc)
-            return {"schema_version": 1, "mode": self.mode, "hardware_ready": False,
-                    "recording": False, "synchronization": "unverified",
-                    "error": str(error), "cameras": [],
-                    "configured_camera_count": self.configured_camera_count,
-                    "sensors": self._sensor_snapshot(now),
-                    "recorder": self._recorder_snapshot(now)}
+            value = {"schema_version": 1, "mode": self.mode, "hardware_ready": False,
+                     "recording": False, "synchronization": "unverified",
+                     "error": str(error), "cameras": [], "polarization": {
+                         "state": "unavailable", "error": str(error)},
+                     "configured_camera_count": self.configured_camera_count}
+
+        recorded = self._recorded_preview_snapshot(now)
+        matching_recorded_preview = (
+            recorded is not None
+            and recorded.get("config_sha256") == recorder.get("config_sha256")
+        )
+        if (recorder.get("state") in ("waiting", "capturing")
+                and matching_recorded_preview):
+            value.update({
+                "hardware_ready": False,
+                "recording": True,
+                "preview_source": "latest-recorded-observation",
+                "recorded_observation_id": recorded["observation_id"],
+                "recorded_observation_relative_path": recorded[
+                    "observation_relative_path"
+                ],
+                "cameras": recorded["cameras"],
+                "polarization": recorded["polarization"],
+            })
+            value.pop("error", None)
+        else:
+            value["preview_source"] = "live-camera-preview"
+            if (not value["hardware_ready"]
+                    and value.get("polarization", {}).get("state") == "live"):
+                value["polarization"]["state"] = "stale"
+        value["configured_camera_count"] = self.configured_camera_count
+        value["sensors"] = self._sensor_snapshot(now)
+        value["recorder"] = recorder
+        return value
 
 
 def run_hardware_preview(config, stop, *, interval=1.0, timeout_ms=5000):
