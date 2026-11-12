@@ -16,6 +16,7 @@ from polstation.acquisition.recording import (
     next_utc_slot,
     record_observation,
     run,
+    settle_exposure,
 )
 from polstation.config import load_config
 
@@ -33,6 +34,7 @@ class RecordingTests(unittest.TestCase):
         self.config["storage"]["state_root"] = str(root / "state")
         self.config["observation_capture"]["maximum_capture_attempts"] = 2
         self.config["observation_capture"]["stream_bytes_per_second"] = 30_000_000
+        self.config["observation_capture"]["exposure_mode"] = "fixed"
         (root / "state").mkdir()
         (root / "state" / "sensor-preview.json").write_text(json.dumps({
             "mode": "hardware-sensors",
@@ -132,7 +134,34 @@ class RecordingTests(unittest.TestCase):
         settings = dict(self.config["observation_capture"], exposure_mode="shared_auto")
         self.assertEqual(_next_exposure(15_000, 2880, settings), 15_000)
         self.assertEqual(_next_exposure(15_000, 0, settings), 30_000)
+        self.assertEqual(_next_exposure(15_000, 4095, settings), 7_500)
         self.assertEqual(_next_exposure(120_000_000, 0, settings), 120_000_000)
+
+    def test_shared_auto_settles_with_discarded_probes_before_saved_capture(self):
+        settings = self.config["observation_capture"]
+        settings["exposure_mode"] = "shared_auto"
+        settings["maximum_exposure_settling_attempts"] = 4
+        calls = []
+
+        def probe(exposure_us, timeout_ms, attempt_number):
+            calls.append(exposure_us)
+            value = 1440 if exposure_us == 15_000 else 2880
+            payload = struct.pack("<16H", *([value] * 16))
+            return {"request_span_ms": 0.7, "frames": [
+                {"camera_id": camera["id"], "status": "complete",
+                 "pixel_format": "Mono12", "width": 4, "height": 4,
+                 "raw": payload}
+                for camera in self.config["cameras"]
+            ]}
+
+        settling = settle_exposure(
+            self.config, probe, 15_000, monotonic=lambda: 0.0
+        )
+        self.assertEqual(calls, [15_000, 30_000])
+        self.assertTrue(settling["converged"])
+        self.assertEqual(settling["selected_exposure_us"], 30_000)
+        self.assertEqual(settling["test_count"], 2)
+        self.assertNotIn("raw", settling["tests"][0]["frames"][0])
 
     def test_once_run_publishes_completed_recorder_state(self):
         capture = self.capture

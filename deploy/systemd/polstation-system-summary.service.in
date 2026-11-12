@@ -1,0 +1,30 @@
+# Replace @INSTALL_ROOT@ with the absolute installed release path.
+[Unit]
+Description=Polstation bounded boot, uptime and storage summary producer
+After=local-fs.target
+PartOf=polstation-preview.target polstation-recording.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=polstation
+Group=polstation
+WorkingDirectory=@INSTALL_ROOT@
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@INSTALL_ROOT@/.venv/bin/polstation-system-summary --config /etc/polstation/config.yaml --interval 30
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polstation/state
+ReadOnlyPaths=/var/lib/polstation/data
+PrivateDevices=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polstation-preview.target polstation-recording.target

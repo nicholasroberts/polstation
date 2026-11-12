@@ -22,6 +22,7 @@ polstation-camera-preview = "polstation.cameras.preview:main"
 polstation-sensor-preview = "polstation.sensors.preview:main"
 polstation-camera-linearity = "polstation.calibration.linearity:main"
 polstation-observation-recorder = "polstation.acquisition.recording:main"
+polstation-system-summary = "polstation.health.system_summary:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

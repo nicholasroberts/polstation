@@ -13,10 +13,18 @@ class DeploymentTests(unittest.TestCase):
     def read(self, name):
         return (SYSTEMD / name).read_text()
 
-    def test_preview_target_owns_three_independent_services(self):
+    def test_preview_target_owns_diagnostic_services(self):
         target = self.read("polstation-preview.target")
-        for name in ("camera-preview", "sensor-preview", "dashboard"):
+        for name in ("camera-preview", "sensor-preview", "dashboard", "system-summary"):
             self.assertIn(f"polstation-{name}.service", target)
+
+    def test_recording_target_is_the_unattended_stack(self):
+        target = self.read("polstation-recording.target")
+        for name in ("observation-recorder", "sensor-preview", "dashboard", "system-summary"):
+            self.assertIn(f"polstation-{name}.service", target)
+        self.assertNotIn("polstation-camera-preview.service", target)
+        self.assertIn("Conflicts=polstation-preview.target", target)
+        self.assertIn("Conflicts=polstation-recording.target", self.read("polstation-preview.target"))
 
     def test_preview_services_use_release_config_and_bounded_state(self):
         expected_commands = {
@@ -92,6 +100,18 @@ class DeploymentTests(unittest.TestCase):
             "polstation-observation-recorder.service",
             self.read("polstation-preview.target"),
         )
+        self.assertIn("PartOf=polstation-recording.target", recorder)
+        self.assertIn("WantedBy=polstation-recording.target", recorder)
+
+    def test_bounded_system_and_journal_status(self):
+        summary = self.read("polstation-system-summary.service.in")
+        self.assertIn("polstation-system-summary", summary)
+        self.assertIn("ReadWritePaths=/var/lib/polstation/state", summary)
+        self.assertIn("ReadOnlyPaths=/var/lib/polstation/data", summary)
+        journald = (ROOT / "deploy/journald/90-polstation-persistent.conf").read_text()
+        self.assertIn("Storage=persistent", journald)
+        self.assertIn("SystemMaxUse=200M", journald)
+        self.assertIn("MaxRetentionSec=30day", journald)
 
 
 if __name__ == "__main__":

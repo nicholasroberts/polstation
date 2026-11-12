@@ -2,7 +2,7 @@
 [Unit]
 Description=Polstation read-only BME280 and EPEVER preview producer
 After=local-fs.target
-PartOf=polstation-preview.target
+PartOf=polstation-preview.target polstation-recording.target
 StartLimitIntervalSec=0
 
 [Service]
@@ -26,4 +26,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=polstation-preview.target
+WantedBy=polstation-preview.target polstation-recording.target

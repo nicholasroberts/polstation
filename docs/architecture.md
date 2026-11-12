@@ -123,8 +123,12 @@ camera ownership is exclusive. The sensor producer and loopback dashboard may
 continue running, and the dashboard reports that the recorder owns the cameras.
 Consequently camera preview images can be stale or unavailable during a
 recording deployment. Closing the dashboard or SSH tunnel has no effect on the
-recorder. Fixed exposure is the safe default. Shared automatic exposure is
-implemented and bounded, but is explicitly unvalidated for scientific field use.
+recorder. Shared automatic exposure is the default. Before every saved
+observation, bounded unsaved diagnostic frames settle one exposure shared by all
+three cameras; a fresh capture is then written as the observation. Attempt and
+elapsed-time limits prevent an unbounded metering loop, and convergence metadata
+is retained in the manifest. Fixed 15 ms exposure remains an explicit operator
+option. Automatic exposure remains unvalidated for scientific field use.
 
 ## Real-sensor diagnostic preview
 
@@ -142,9 +146,11 @@ import the hardware drivers or open either device. Production sampling schedules
 validation, observation storage, retry policy, and integration into scientific
 acquisition remain future work.
 
-The diagnostic deployment keeps the camera producer, sensor producer, and
-loopback dashboard in three systemd services grouped by
-`polstation-preview.target`. Stopping the target propagates a clean stop to each
-process; an individual failure is restarted without coupling the other services.
+The unattended deployment groups the recorder, sensor producer, loopback
+dashboard and bounded system-summary producer under
+`polstation-recording.target`. `polstation-preview.target` is an explicit
+diagnostic alternative which substitutes the camera preview for the recorder.
+The targets conflict so only one camera owner is selected. Stopping a target
+propagates a clean stop; an individual failure is restarted independently.
 Only the producers may write bounded runtime state, and only the sensor producer
 receives the `i2c` and `dialout` supplementary groups.

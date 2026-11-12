@@ -72,17 +72,62 @@ function elapsed(seconds) {
   if (minutes) return `${minutes}m ${secs}s`;
   return `${secs}s`;
 }
+function displayBytes(value) {
+  if (!Number.isFinite(value)) return '—';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let scaled = Math.max(0, value), unit = 0;
+  while (scaled >= 1024 && unit < units.length - 1) { scaled /= 1024; unit += 1; }
+  return `${scaled.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+function displayExposureRange(minimum, maximum) {
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return '—';
+  const format = value => value >= 1000000 ? `${(value / 1000000).toFixed(1)} s` : `${(value / 1000).toFixed(1)} ms`;
+  return `${format(minimum)}–${format(maximum)}`;
+}
+function renderOperations(data) {
+  const history = data.recording_history || {state: 'unavailable', totals: {}, last_24_hours: {}, last_7_days: {}, recent_events: []};
+  const system = data.system_summary || {state: 'unavailable', storage: {}, recent_boots: []};
+  const totals = history.totals || {}, day = history.last_24_hours || {}, week = history.last_7_days || {}, storage = system.storage || {};
+  document.querySelector('#operations-status').textContent = `Recording index ${history.state || 'unavailable'} · system status ${system.state || 'unavailable'}`;
+  document.querySelector('#ops-total').textContent = Number.isFinite(totals.complete_observations) ? String(totals.complete_observations) : '—';
+  document.querySelector('#ops-total-note').textContent = `${totals.failed_observations || 0} retained failures · ${totals.raw_frames || 0} raw frames`;
+  document.querySelector('#ops-day').textContent = Number.isFinite(day.complete_observations) ? `${day.complete_observations} / ${day.expected_observations || 0}` : '—';
+  document.querySelector('#ops-day-note').textContent = `${week.complete_observations || 0} completed in 7 days`;
+  document.querySelector('#ops-data').textContent = displayBytes(totals.raw_bytes);
+  document.querySelector('#ops-data-note').textContent = `${totals.raw_frames || 0} original Mono12 frames`;
+  document.querySelector('#ops-storage').textContent = displayBytes(storage.free_bytes);
+  document.querySelector('#ops-storage-note').textContent = Number.isFinite(storage.minimum_free_bytes) ? `Protected reserve ${displayBytes(storage.minimum_free_bytes)}` : 'Minimum reserve unknown';
+  document.querySelector('#ops-uptime').textContent = elapsed(system.uptime_seconds);
+  document.querySelector('#ops-boot-note').textContent = `${system.observed_boot_count || 0} boots observed by this bounded index`;
+  document.querySelector('#ops-exposure').textContent = displayExposureRange(day.minimum_exposure_us, day.maximum_exposure_us);
+  document.querySelector('#ops-settling-note').textContent = `${day.settling_tests || 0} test frames · ${day.settling_not_converged || 0} not converged`;
+  const problems = (week.failed_observations || 0) + (day.saturated_observations || 0) + (day.underexposed_observations || 0) + (day.settling_not_converged || 0);
+  const alert = document.querySelector('#operations-alert');
+  alert.dataset.state = problems ? 'warning' : 'ok';
+  alert.textContent = problems ? `${week.failed_observations || 0} failed observations in 7 days · ${day.saturated_observations || 0} saturated · ${day.underexposed_observations || 0} underexposed · ${day.settling_not_converged || 0} settling limits in 24 hours` : 'No indexed recording faults, clipping or settling failures in the displayed periods.';
+  const events = document.querySelector('#operations-events');
+  events.replaceChildren();
+  if (!(history.recent_events || []).length) { const empty = document.createElement('p'); empty.textContent = 'No indexed observations yet.'; events.append(empty); return; }
+  for (const event of history.recent_events) {
+    const row = document.createElement('div'); row.className = 'event-row';
+    const time = document.createElement('time'); time.textContent = event.started_at_utc ? new Date(event.started_at_utc).toLocaleString() : 'Unknown time';
+    const kind = document.createElement('b'); kind.textContent = event.kind === 'complete' ? 'Complete' : 'Failed';
+    const detail = document.createElement('span'); detail.textContent = `${event.observation_id || 'unknown observation'}${Number.isFinite(event.exposure_us) ? ` · ${(event.exposure_us / 1000).toFixed(1)} ms` : ''}`;
+    row.append(time, kind, detail); events.append(row);
+  }
+}
 function renderRecorder(data) {
   const recorder = data.recorder || {state: 'unavailable'};
-  const active = ['waiting', 'capturing'].includes(recorder.state);
+  const active = ['waiting', 'settling', 'capturing'].includes(recorder.state);
   const labels = {
-    waiting: 'Armed', capturing: 'Capturing', complete: 'Complete',
+    waiting: 'Armed', settling: 'Metering', capturing: 'Capturing', complete: 'Complete',
     failed: 'Fault', low_disk: 'Paused', stopped: 'Stopped',
     stale: 'Stale', unavailable: 'Off'
   };
   document.querySelector('#recording-state').textContent = labels[recorder.state] || recorder.state;
   let note = 'not started';
   if (recorder.state === 'capturing') note = 'three raw frames';
+  else if (recorder.state === 'settling') note = 'bounded shared-auto test frames';
   else if (recorder.state === 'waiting' && Number.isFinite(recorder.time_until_next_acquisition_seconds)) note = `${recorder.last_attempt_state === 'failed' ? 'last failed · ' : ''}next in ${elapsed(recorder.time_until_next_acquisition_seconds)}`;
   else if (recorder.state === 'failed') note = recorder.last_error || 'last attempt failed';
   else if (recorder.state === 'low_disk') note = 'low disk · no deletion';
@@ -146,6 +191,7 @@ function render(data) {
     ? 'Allied Vision Mako G-223B × 3 · latest recorded diagnostic'
     : hardware ? 'Allied Vision Mako G-223B × 3 · live diagnostic' : 'Allied Vision Mako G-223B × 3 · simulated';
   renderSensors(data, hardware);
+  renderOperations(data);
   const currentIds = new Set(data.cameras.map(camera => camera.id));
   cards.forEach((card, id) => { if (!currentIds.has(id)) { card.remove(); cards.delete(id); } });
   data.cameras.forEach((camera, index) => {

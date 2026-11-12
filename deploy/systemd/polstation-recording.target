@@ -1,0 +1,8 @@
+[Unit]
+Description=Polstation unattended scientific-recording stack
+Wants=polstation-observation-recorder.service polstation-sensor-preview.service polstation-dashboard.service polstation-system-summary.service
+After=network.target
+Conflicts=polstation-preview.target
+
+[Install]
+WantedBy=multi-user.target

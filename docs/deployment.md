@@ -113,15 +113,15 @@ which config backup belongs to the preceding release for rollback.
 sudo -u polstation /opt/polstation/releases/v0.1.0/.venv/bin/polstation-check-config --config /etc/polstation/config.yaml
 ```
 
-## 4. Activate and verify the diagnostic preview stack
+## 4. Activate and verify the unattended recording stack
 
-For updates, stop the preview target before changing the active link. On first
-install, there are no preview services to stop. Preserve the previous link target
+For updates, stop both mutually exclusive targets before changing the active
+link. On first install, there are no services to stop. Preserve the previous link target
 (`readlink /opt/polstation/current`) and configuration before activation.
 
 ```sh
 # Updates only:
-sudo systemctl stop polstation-preview.target
+sudo systemctl stop polstation-recording.target polstation-preview.target
 # First install and updates:
 sudo ln -sfn /opt/polstation/releases/v0.1.0 /opt/polstation/current
 
@@ -132,50 +132,57 @@ sudo install -o root -g root -m 0755 \
 sudo /etc/NetworkManager/dispatcher.d/90-polstation-camera-address \
     eth0 dhcp4-change
 
-for name in camera-preview sensor-preview dashboard; do
+for name in camera-preview sensor-preview dashboard observation-recorder system-summary; do
     sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' \
         "deploy/systemd/polstation-${name}.service.in" \
         | sudo tee "/etc/systemd/system/polstation-${name}.service" >/dev/null
 done
-sed 's|@INSTALL_ROOT@|/opt/polstation/current|g' \
-    deploy/systemd/polstation-observation-recorder.service.in \
-    | sudo tee /etc/systemd/system/polstation-observation-recorder.service >/dev/null
 sudo install -o root -g root -m 0644 \
     deploy/systemd/polstation-preview.target \
     /etc/systemd/system/polstation-preview.target
+sudo install -o root -g root -m 0644 \
+    deploy/systemd/polstation-recording.target \
+    /etc/systemd/system/polstation-recording.target
+sudo install -d -o root -g root -m 0755 /etc/systemd/journald.conf.d
+sudo install -o root -g root -m 0644 \
+    deploy/journald/90-polstation-persistent.conf \
+    /etc/systemd/journald.conf.d/90-polstation-persistent.conf
 sudo systemd-analyze verify \
     /etc/systemd/system/polstation-camera-preview.service \
     /etc/systemd/system/polstation-sensor-preview.service \
     /etc/systemd/system/polstation-dashboard.service \
     /etc/systemd/system/polstation-observation-recorder.service \
-    /etc/systemd/system/polstation-preview.target
+    /etc/systemd/system/polstation-system-summary.service \
+    /etc/systemd/system/polstation-preview.target \
+    /etc/systemd/system/polstation-recording.target
 sudo systemctl daemon-reload
-sudo systemctl enable --now polstation-preview.target
+sudo systemctl restart systemd-journald
+sudo systemctl disable polstation-preview.target
+sudo systemctl enable --now polstation-recording.target
 sudo systemctl status \
-    polstation-camera-preview \
+    polstation-observation-recorder \
     polstation-sensor-preview \
-    polstation-dashboard
+    polstation-dashboard \
+    polstation-system-summary
 sudo journalctl \
-    -u polstation-camera-preview \
+    -u polstation-observation-recorder \
     -u polstation-sensor-preview \
     -u polstation-dashboard \
     -n 100 --no-pager
 ```
 
-The timed recorder unit is installed but deliberately not enabled here. It
-conflicts with the camera-preview service because both require exclusive camera
-ownership. Commission its Mono12 storage rate, 10-minute scheduling, exposure
-policy, and `observation_capture.stream_bytes_per_second` on the actual camera
-network before enabling it. See [operations](operations.md) for controlled start,
-status, and return-to-preview commands.
+The timed recorder is the unattended default. It uses bounded shared-auto test
+frames before each immutable capture; fixed 15 ms remains an explicit option.
+It conflicts with camera preview because both require exclusive camera
+ownership. See [operations](operations.md) for controlled switching.
 
 The two diagnostic producers can write only the replaceable state directory; the
 dashboard has read-only access. The separately activated recorder can write the
 data and state roots. `SupplementaryGroups=i2c dialout` grants the sensor
 producer the permissions already verified during commissioning. The Vimba camera
 producer and recorder load `/etc/polstation/vimbax.env`. The service account does
-not own or modify release code. The preview target runs diagnostics only; it does
-not start the recorder.
+not own or modify release code. The preview target remains an optional
+diagnostic mode and does not start the recorder.
 
 The NetworkManager hook above is specific to the commissioned temporary lab
 addressing described in the [Pi/Vimba X bring-up record](commissioning/2026-09-28-pi5-vimbax-camera-bring-up.md).
@@ -205,7 +212,7 @@ and troubleshooting checks are in the [quickstart](quickstart.md).
 
 ## Rollback
 
-Stop `polstation-preview.target`, restore the preceding release's configuration
+Stop both `polstation-recording.target` and `polstation-preview.target`, restore the preceding release's configuration
 (including its provenance), and change `/opt/polstation/current` back to its
 recorded release directory using `sudo ln -sfn`. If unit templates changed,
 restore the preceding units and run `sudo systemctl daemon-reload`. Restart the

@@ -5,7 +5,7 @@ For the normal laptop connection and dashboard procedure, use the
 recovery operations on the Pi.
 
 ```sh
-sudo systemctl status polstation-preview.target
+sudo systemctl status polstation-recording.target polstation-preview.target
 sudo systemctl status polstation-camera-preview polstation-sensor-preview polstation-dashboard
 sudo journalctl -u polstation-camera-preview -n 100 --no-pager
 sudo journalctl -u polstation-sensor-preview -n 100 --no-pager
@@ -15,28 +15,34 @@ sudo systemctl status polstation-observation-recorder
 sudo journalctl -u polstation-observation-recorder -n 100 --no-pager
 ```
 
-`polstation-preview.target` starts and stops the three diagnostic processes as a
-group. They remain separate services: a crashed process restarts after 10 seconds
-without taking down the other two. The camera and sensor producers publish bounded
-latest-value files under `/var/lib/polstation/state`; the dashboard only reads
-them. Stop the entire diagnostic stack cleanly with:
+`polstation-recording.target` is the normal unattended boot mode and owns the
+recorder, sensor, dashboard and system-summary services. The conflicting
+`polstation-preview.target` is an optional diagnostic mode which owns the live
+camera preview instead of the recorder. Switch explicitly with:
 
 ```sh
+sudo systemctl stop polstation-recording.target
+sudo systemctl start polstation-preview.target
+# Return to unattended recording:
 sudo systemctl stop polstation-preview.target
+sudo systemctl start polstation-recording.target
 ```
+
+The processes remain separate and restart independently. Producers publish
+bounded latest-value files under `/var/lib/polstation/state`; the dashboard only
+reads them.
 
 ## Timed observation recording
 
-The recorder is deliberately not part of `polstation-preview.target` and is not
-enabled by the deployment instructions until real-camera commissioning is
-complete. Before its first start, set the measured safe
+The recorder belongs to `polstation-recording.target`, which is enabled after
+real-camera commissioning. Before its first start, set the measured safe
 `observation_capture.stream_bytes_per_second` value in the deployed configuration
 and validate it:
 
 ```sh
 sudo -u polstation /opt/polstation/current/.venv/bin/polstation-check-config \
   --config /etc/polstation/config.yaml
-sudo systemctl start polstation-observation-recorder.service
+sudo systemctl start polstation-recording.target
 ```
 
 Starting the recorder stops the conflicting camera-preview service; an explicit
@@ -59,8 +65,8 @@ PY
 To return to diagnostic camera previews:
 
 ```sh
-sudo systemctl stop polstation-observation-recorder.service
-sudo systemctl start polstation-camera-preview.service
+sudo systemctl stop polstation-recording.target
+sudo systemctl start polstation-preview.target
 ```
 
 Do not run the recorder and ad-hoc Vimba scripts simultaneously. A completed
@@ -76,7 +82,11 @@ exit triggers systemd restart after 10 seconds, with no restart-rate cutoff;
 permanent configuration or permission errors therefore require operator
 intervention and will remain visible in the journal.
 
-Journald controls log retention: configure bounded journal storage on the Pi.
+The deployed journald drop-in preserves compressed logs across reboot while
+bounding them to 200 MiB and 30 days. The dashboard's operational section reads
+bounded summary files for completed/failed observations, exposure settling,
+exposure range, boot history, uptime and storage. It does not scrape journals or
+control services. Journald remains the detailed audit trail.
 A service restart is not a hung-process watchdog. There is no external alerting,
 backup automation, driver recovery or autonomous software updater yet.
 

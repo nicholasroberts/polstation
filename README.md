@@ -183,6 +183,9 @@ uses bounded software-parallel requests and explicitly records synchronization
 as unverified. Failed attempts remain on disk without a completion manifest, and
 the recorder never performs automatic raw-data deletion. Its replaceable status
 snapshot supplies the dashboard’s recorder state and “time since acquisition.”
+Shared automatic exposure is the default: bounded diagnostic test frames settle
+one exposure shared by all cameras before a fresh saved capture. Fixed 15 ms is
+available only when explicitly configured; test-frame pixels are not saved.
 After each completed bundle it also publishes a bounded diagnostic snapshot of
 the three recorded frames and DoLP/AoP maps. While the recorder owns the cameras,
 the dashboard labels and displays these as recorded—not live—and shows their
@@ -190,16 +193,17 @@ source path under `/var/lib/polstation/data`. The diagnostic PNGs are replaceabl
 state; only the immutable Mono12 bundle is the observation.
 
 The recorder requires exclusive camera ownership and conflicts with the
-diagnostic camera-preview service. Its systemd unit is installed but not enabled
-by the standard preview deployment. Configure the measured safe GigE stream
-limit and follow [operations](docs/operations.md) before hardware testing.
+diagnostic camera-preview service. `polstation-recording.target` is the normal
+unattended boot target; `polstation-preview.target` is an operator-selected
+diagnostic alternative. The dashboard shows bounded observation, exposure,
+settling, storage, uptime and boot summaries. Configure the measured safe GigE
+stream limit and follow [operations](docs/operations.md) before hardware testing.
 
 ## Repository and deployment
 
 Code lives under `src/polstation/`; `tests/` is hardware-independent.
-`deploy/systemd/` contains separate camera-preview, sensor-preview and dashboard
-units plus a target that manages the diagnostic stack as one operator action,
-and a separate timed-recorder unit requiring explicit commissioning.
+`deploy/systemd/` contains mutually exclusive recording and diagnostic-preview
+targets plus separate hardware, dashboard and bounded-summary services.
 The units keep hardware access out of the web process, restart failed processes,
 and preserve the dashboard's loopback-only binding.
 

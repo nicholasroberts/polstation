@@ -15,6 +15,7 @@ from pathlib import Path
 import signal
 import sys
 import threading
+import time
 import uuid
 
 from polstation.cameras.preview import (
@@ -25,6 +26,11 @@ from polstation.cameras.preview import (
     _read_feature,
 )
 from polstation.config import load_config
+from polstation.health.recording_summary import (
+    append_failure,
+    append_observation,
+    rebuild_recording_summary,
+)
 from polstation.logging.setup import configure
 from polstation.polarization.preview import (
     central_circular_roi,
@@ -165,6 +171,11 @@ def _next_exposure(current_us, brightness_dn, settings):
     maximum_step = settings["maximum_step_factor"]
     if target - tolerance <= brightness_dn <= target + tolerance:
         candidate = current_us
+    elif brightness_dn >= 4095:
+        # A clipped percentile is only a lower bound on scene brightness. Take
+        # the largest permitted downward step so settling escapes saturation
+        # promptly rather than treating 4095 as a precise measurement.
+        candidate = current_us / maximum_step
     elif brightness_dn <= 0:
         candidate = current_us * maximum_step
     else:
@@ -174,6 +185,125 @@ def _next_exposure(current_us, brightness_dn, settings):
         settings["maximum_exposure_us"],
         max(settings["minimum_exposure_us"], round(candidate)),
     )
+
+
+def _capture_frames_by_id(captured, expected_ids):
+    frames = captured.get("frames", [])
+    by_id = {frame.get("camera_id"): frame for frame in frames}
+    if len(by_id) != len(frames) or set(by_id) != set(expected_ids):
+        raise ValueError("capture result must contain each configured camera exactly once")
+    return frames
+
+
+def _complete_mono12_frames(frames):
+    return all(
+        frame.get("status") == "complete"
+        and frame.get("raw") is not None
+        and frame.get("pixel_format") == "Mono12"
+        for frame in frames
+    )
+
+
+def settle_exposure(config, capture_attempt, initial_exposure_us, *, monotonic=None):
+    """Bound shared exposure with diagnostic probes before a saved observation.
+
+    Probe pixels are deliberately not persisted. Bounded probe metadata and ROI
+    percentiles are returned for the immutable observation manifest. The final
+    scientific capture is always a fresh three-camera acquisition performed by
+    ``record_observation`` after this function returns.
+    """
+    settings = config["observation_capture"]
+    exposure_us = initial_exposure_us
+    if settings["exposure_mode"] == "fixed":
+        return {
+            "mode": "fixed",
+            "status": "not-required",
+            "converged": True,
+            "initial_exposure_us": initial_exposure_us,
+            "selected_exposure_us": initial_exposure_us,
+            "test_count": 0,
+            "elapsed_seconds": 0.0,
+            "tests": [],
+        }
+
+    monotonic = monotonic or time.monotonic
+    started = monotonic()
+    expected_ids = [camera["id"] for camera in config["cameras"]]
+    tests = []
+    selected_exposure_us = exposure_us
+    status = "attempt-limit"
+    converged = False
+
+    for test_number in range(1, settings["maximum_exposure_settling_attempts"] + 1):
+        if tests and monotonic() - started >= settings["maximum_exposure_settling_seconds"]:
+            status = "time-limit"
+            break
+        timeout_ms = exposure_timeout_ms(
+            exposure_us, settings["timeout_margin_seconds"]
+        )
+        captured = capture_attempt(exposure_us, timeout_ms, test_number)
+        frames = _capture_frames_by_id(captured, expected_ids)
+        public_frames = [
+            {key: value for key, value in frame.items() if key != "raw"}
+            for frame in frames
+        ]
+        test = {
+            "test": test_number,
+            "exposure_requested_us": exposure_us,
+            "timeout_ms": timeout_ms,
+            "request_span_ms": captured.get("request_span_ms"),
+            "frames": public_frames,
+            "complete": _complete_mono12_frames(frames),
+        }
+        tests.append(test)
+        if not test["complete"]:
+            test["result"] = "incomplete"
+            continue
+
+        percentiles = {
+            frame["camera_id"]: _mono12_roi_percentile(
+                frame["raw"], frame["width"], frame["height"],
+                settings["brightness_percentile"],
+            )
+            for frame in frames
+        }
+        brightest_dn = max(percentiles.values())
+        candidate = _next_exposure(exposure_us, brightest_dn, settings)
+        within_tolerance = (
+            settings["target_brightness_dn"] - settings["brightness_tolerance_dn"]
+            <= brightest_dn
+            <= settings["target_brightness_dn"] + settings["brightness_tolerance_dn"]
+        )
+        test.update({
+            "percentile_dn_by_camera": percentiles,
+            "brightest_percentile_dn": brightest_dn,
+            "next_exposure_us": candidate,
+            "within_tolerance": within_tolerance,
+            "result": "converged" if within_tolerance else "adjust",
+        })
+        selected_exposure_us = exposure_us
+        if within_tolerance:
+            status = "converged"
+            converged = True
+            break
+        if candidate == exposure_us:
+            status = "exposure-limit"
+            break
+        exposure_us = candidate
+        selected_exposure_us = candidate
+
+    return {
+        "mode": "shared_auto",
+        "status": status,
+        "converged": converged,
+        "initial_exposure_us": initial_exposure_us,
+        "selected_exposure_us": selected_exposure_us,
+        "test_count": len(tests),
+        "elapsed_seconds": round(monotonic() - started, 6),
+        "maximum_attempts": settings["maximum_exposure_settling_attempts"],
+        "maximum_seconds": settings["maximum_exposure_settling_seconds"],
+        "tests": tests,
+    }
 
 
 def _attempt_public_record(attempt):
@@ -188,7 +318,8 @@ def _attempt_public_record(attempt):
 
 
 def record_observation(config, capture_attempt, exposure_us, *,
-                       scheduled_for_utc=None, observation_id=None, now=None):
+                       scheduled_for_utc=None, observation_id=None, now=None,
+                       exposure_settling=None):
     """Record one immutable observation using a hardware or test capture callback."""
     now = now or (lambda: datetime.now(timezone.utc))
     started_at = now()
@@ -211,10 +342,8 @@ def record_observation(config, capture_attempt, exposure_us, *,
 
     for attempt_number in range(1, config["observation_capture"]["maximum_capture_attempts"] + 1):
         captured = capture_attempt(exposure_us, timeout_ms, attempt_number)
-        frames = captured.get("frames", [])
-        by_id = {frame.get("camera_id"): frame for frame in frames}
-        if len(by_id) != len(frames) or set(by_id) != set(expected_ids):
-            raise ValueError("capture result must contain each configured camera exactly once")
+        frames = _capture_frames_by_id(captured, expected_ids)
+        by_id = {frame["camera_id"]: frame for frame in frames}
         attempt = {
             "attempt": attempt_number,
             "request_span_ms": captured.get("request_span_ms"),
@@ -237,12 +366,7 @@ def record_observation(config, capture_attempt, exposure_us, *,
                 frame["raw"] = None
             attempt["frames"].append(frame)
         attempts.append(attempt)
-        complete = all(
-            frame.get("status") == "complete"
-            and frame.get("raw") is not None
-            and frame.get("pixel_format") == "Mono12"
-            for frame in attempt["frames"]
-        )
+        complete = _complete_mono12_frames(attempt["frames"])
         if complete:
             selected_attempt = attempt
             break
@@ -323,6 +447,15 @@ def record_observation(config, capture_attempt, exposure_us, *,
             "percentile_dn_by_camera": percentiles,
             "brightest_percentile_dn": brightest_dn,
             "next_exposure_us": next_exposure_us,
+            "settling": exposure_settling or {
+                "mode": config["observation_capture"]["exposure_mode"],
+                "status": "not-performed",
+                "converged": None,
+                "initial_exposure_us": exposure_us,
+                "selected_exposure_us": exposure_us,
+                "test_count": 0,
+                "tests": [],
+            },
             "validated_for_scientific_use": False,
         },
         "sensor_snapshot": sensor_snapshot,
@@ -589,6 +722,7 @@ def _publish_state(path, config, state, **values):
 
 def run(config, stop, *, once=False, recorder_factory=VmbMono12Recorder):
     prepare(config)
+    rebuild_recording_summary(config)
     state_path = Path(config["storage"]["state_root"]) / "observation-recorder.json"
     previous = _read_recorder_state(state_path)
     settings = config["observation_capture"]
@@ -655,9 +789,21 @@ def run(config, stop, *, once=False, recorder_factory=VmbMono12Recorder):
                     **retained,
                 )
                 try:
+                    _publish_state(
+                        state_path, config, "settling",
+                        next_acquisition_at_utc=None,
+                        applied_exposure_us=exposure_us,
+                        next_exposure_us=exposure_us,
+                        **retained,
+                    )
+                    settling = settle_exposure(
+                        config, recorder.capture_attempt, exposure_us
+                    )
+                    exposure_us = settling["selected_exposure_us"]
                     result = record_observation(
                         config, recorder.capture_attempt, exposure_us,
                         scheduled_for_utc=scheduled,
+                        exposure_settling=settling,
                     )
                     try:
                         _publish_recorded_preview(config, result)
@@ -668,6 +814,7 @@ def run(config, stop, *, once=False, recorder_factory=VmbMono12Recorder):
                         )
                     exposure_us = result["next_exposure_us"]
                     manifest = result["manifest"]
+                    append_observation(config, manifest)
                     retained = {
                         "last_acquisition_at_utc": manifest["completed_at_utc"],
                         "last_observation_id": manifest["observation_id"],
@@ -687,6 +834,15 @@ def run(config, stop, *, once=False, recorder_factory=VmbMono12Recorder):
                     )
                 except ObservationCaptureError as error:
                     logger.exception("Observation failed; partial bundle retained at %s", error.path)
+                    try:
+                        append_failure(
+                            config,
+                            json.loads((error.path / "failure.json").read_text()),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Could not update recording summary for %s", error.path
+                        )
                     retained.update({
                         "last_attempt_state": "failed",
                         "last_error": str(error),

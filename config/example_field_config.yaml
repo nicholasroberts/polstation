@@ -20,7 +20,7 @@ camera_preview:
   maximum_step_factor: 2
 observation_capture:
   interval_seconds: 600
-  exposure_mode: fixed
+  exposure_mode: shared_auto
   initial_exposure_us: 15000
   minimum_exposure_us: 100
   maximum_exposure_us: 120000000
@@ -30,6 +30,8 @@ observation_capture:
   maximum_step_factor: 2
   timeout_margin_seconds: 10
   maximum_capture_attempts: 3
+  maximum_exposure_settling_attempts: 24
+  maximum_exposure_settling_seconds: 480
   stream_bytes_per_second: null  # Replace only with a measured field-network value.
 polarization_preview:
   instrument_matrix: null  # Optional provisional diagnostic calibration; see docs/calibration.md.

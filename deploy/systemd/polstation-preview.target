@@ -1,7 +1,8 @@
 [Unit]
 Description=Polstation diagnostic hardware-preview stack
-Wants=polstation-camera-preview.service polstation-sensor-preview.service polstation-dashboard.service
+Wants=polstation-camera-preview.service polstation-sensor-preview.service polstation-dashboard.service polstation-system-summary.service
 After=network.target
+Conflicts=polstation-recording.target
 
 [Install]
 WantedBy=multi-user.target

@@ -32,6 +32,19 @@
     <article class="polarization-card"><div><span class="channel">SENSOR-RELATIVE ANGLE OF POLARIZATION</span><h3>AoP</h3></div><div class="derived-preview"><img id="aop-preview" alt="Diagnostic sensor-relative angle of polarization map"><div class="derived-overlay" hidden></div></div><div class="legend"><img id="aop-legend" alt="AoP cyclic cmocean phase colour scale"><div><span>0°</span><span>45°</span><span>90°</span><span>135°</span><span>180°</span></div></div></article>
   </div>
 </section>
+<section id="operations" class="operations" aria-labelledby="operations-title">
+  <div class="operations-heading"><div><span class="eyebrow">BOUNDED OPERATIONAL HISTORY</span><h2 id="operations-title">Recording and system summary</h2></div><span id="operations-status" role="status">Waiting for operational summaries…</span></div>
+  <div class="operations-grid">
+    <article><span>OBSERVATIONS · ALL TIME</span><strong id="ops-total">—</strong><small id="ops-total-note">No index available</small></article>
+    <article><span>LAST 24 HOURS</span><strong id="ops-day">—</strong><small id="ops-day-note">Completed / expected</small></article>
+    <article><span>RECORDED RAW DATA</span><strong id="ops-data">—</strong><small id="ops-data-note">Original Mono12 frames</small></article>
+    <article><span>STORAGE FREE</span><strong id="ops-storage">—</strong><small id="ops-storage-note">Minimum reserve unknown</small></article>
+    <article><span>SYSTEM UPTIME</span><strong id="ops-uptime">—</strong><small id="ops-boot-note">Boot history unavailable</small></article>
+    <article><span>24 HOUR EXPOSURE RANGE</span><strong id="ops-exposure">—</strong><small id="ops-settling-note">Settling history unavailable</small></article>
+  </div>
+  <div class="operations-alert" id="operations-alert">No recording faults reported.</div>
+  <div class="event-list"><h3>Recent recording events</h3><div id="operations-events"><p>No indexed observations yet.</p></div></div>
+</section>
 <section class="notes"><div><span class="eyebrow">SERVICE BOUNDARY</span><h2>The browser is just the view.</h2><p>The preview, sensors and timed recorder run independently on the Pi and publish only bounded status snapshots. Closing this page does not stop an active recorder.</p></div><div><span class="eyebrow">SCIENTIFIC STATUS</span><h2>Only immutable raw bundles are observations.</h2><p>Dashboard images remain diagnostic. Recorded Mono12 files retain provenance and hashes; three-camera exposure synchronization remains software-parallel and unverified.</p></div></section>
 <footer><span>POLSTATION / DEVELOPMENT PREVIEW</span><span id="footer-status">Allied Vision Mako G-223B × 3</span></footer>
 </main>

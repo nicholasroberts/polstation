@@ -45,6 +45,10 @@ class ScaffoldTests(unittest.TestCase):
             load_config(legacy_path)["observation_capture"]["interval_seconds"],
             600,
         )
+        self.assertEqual(
+            load_config(legacy_path)["observation_capture"]["exposure_mode"],
+            "shared_auto",
+        )
         legacy_preview = copy.deepcopy(self.config)
         legacy_preview["camera_preview"].pop("stream_bytes_per_second")
         legacy_preview_path = Path(self.tmp.name) / "legacy-preview.yaml"
@@ -86,6 +90,8 @@ class ScaffoldTests(unittest.TestCase):
         for key, value in (
             ("interval_seconds", 0),
             ("maximum_capture_attempts", 1.5),
+            ("maximum_exposure_settling_attempts", 0),
+            ("maximum_exposure_settling_seconds", 0),
             ("maximum_exposure_us", 120_000_001),
             ("brightness_percentile", 101),
             ("target_brightness_dn", 4096),

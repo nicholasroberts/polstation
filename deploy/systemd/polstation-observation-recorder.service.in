@@ -3,6 +3,7 @@
 Description=Polstation timed three-camera raw observation recorder
 After=local-fs.target network.target polstation-camera-preview.service
 Conflicts=polstation-camera-preview.service
+PartOf=polstation-recording.target
 StartLimitIntervalSec=0
 
 [Service]
@@ -26,4 +27,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=polstation-recording.target

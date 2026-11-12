@@ -306,6 +306,12 @@ class FilePreviewSource:
         self.recorded_preview_path = (
             Path(config["storage"]["state_root"]) / "observation-preview.json"
         )
+        self.recording_summary_path = (
+            Path(config["storage"]["state_root"]) / "recording-summary.json"
+        )
+        self.system_summary_path = (
+            Path(config["storage"]["state_root"]) / "system-summary.json"
+        )
         self.configured_camera_count = len(config["cameras"])
         self.configured_camera_ids = {camera["id"] for camera in config["cameras"]}
         self.stale_after_seconds = config["dashboard"]["stale_after_seconds"]
@@ -386,6 +392,102 @@ class FilePreviewSource:
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             return None
 
+    def _recording_history_snapshot(self, now, recorder):
+        try:
+            value = json.loads(self.recording_summary_path.read_text())
+            if (value.get("mode") != "recording-summary"
+                    or not isinstance(value.get("totals"), dict)
+                    or not isinstance(value.get("recent_observations"), list)):
+                raise ValueError("invalid recording summary")
+            updated = datetime.fromisoformat(value["updated_at_utc"])
+            age = max(0.0, (now - updated).total_seconds())
+            interval = recorder.get("interval_seconds") or 600
+            recent = value["recent_observations"]
+            day_cutoff = now.timestamp() - 86400
+            week_cutoff = now.timestamp() - 7 * 86400
+
+            def timestamp(item):
+                try:
+                    return datetime.fromisoformat(item["started_at_utc"]).timestamp()
+                except (KeyError, TypeError, ValueError):
+                    return 0
+
+            day = [item for item in recent if timestamp(item) >= day_cutoff]
+            week = [item for item in recent if timestamp(item) >= week_cutoff]
+            exposures = [
+                item.get("exposure_us") for item in day
+                if isinstance(item.get("exposure_us"), (int, float))
+            ]
+            first = value["totals"].get("first_observation_at_utc")
+            try:
+                observed_seconds = min(
+                    86400,
+                    max(0, (now - datetime.fromisoformat(first)).total_seconds()),
+                )
+                expected_day = int(observed_seconds // interval)
+            except (TypeError, ValueError):
+                expected_day = 0
+            value.update({
+                "state": "live" if age <= max(2 * interval, self.stale_after_seconds) else "stale",
+                "age_seconds": age,
+                "last_24_hours": {
+                    "complete_observations": len(day),
+                    "expected_observations": expected_day,
+                    "saturated_observations": sum(
+                        (item.get("brightest_percentile_dn") or 0) >= 4095
+                        for item in day
+                    ),
+                    "underexposed_observations": sum(
+                        isinstance(item.get("brightest_percentile_dn"), (int, float))
+                        and item["brightest_percentile_dn"] <= 100
+                        for item in day
+                    ),
+                    "settling_not_converged": sum(
+                        item.get("settling_converged") is False for item in day
+                    ),
+                    "settling_tests": sum(
+                        item.get("settling_test_count") or 0 for item in day
+                    ),
+                    "minimum_exposure_us": min(exposures) if exposures else None,
+                    "maximum_exposure_us": max(exposures) if exposures else None,
+                },
+                "last_7_days": {
+                    "complete_observations": len(week),
+                    "failed_observations": sum(
+                        timestamp(item) >= week_cutoff
+                        for item in value.get("recent_failures", [])
+                    ),
+                },
+                "recent_events": sorted(
+                    recent[-8:] + value.get("recent_failures", [])[-8:],
+                    key=lambda item: item.get("started_at_utc") or "",
+                    reverse=True,
+                )[:8],
+            })
+            return value
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return {
+                "state": "unavailable", "age_seconds": None, "totals": {},
+                "last_24_hours": {}, "last_7_days": {}, "recent_events": [],
+                "error": str(error),
+            }
+
+    def _system_summary_snapshot(self, now):
+        try:
+            value = json.loads(self.system_summary_path.read_text())
+            if value.get("mode") != "system-summary":
+                raise ValueError("invalid system summary")
+            updated = datetime.fromisoformat(value["updated_at_utc"])
+            age = max(0.0, (now - updated).total_seconds())
+            value["age_seconds"] = age
+            value["state"] = "live" if age <= self.stale_after_seconds else "stale"
+            return value
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return {
+                "state": "unavailable", "age_seconds": None, "storage": {},
+                "recent_boots": [], "error": str(error),
+            }
+
     def snapshot(self, scenario="live"):
         if scenario != "live":
             raise ValueError("hardware preview has no simulated fault scenarios")
@@ -416,7 +518,7 @@ class FilePreviewSource:
             recorded is not None
             and recorded.get("config_sha256") == recorder.get("config_sha256")
         )
-        if (recorder.get("state") in ("waiting", "capturing")
+        if (recorder.get("state") in ("waiting", "settling", "capturing")
                 and matching_recorded_preview):
             value.update({
                 "hardware_ready": False,
@@ -438,6 +540,8 @@ class FilePreviewSource:
         value["configured_camera_count"] = self.configured_camera_count
         value["sensors"] = self._sensor_snapshot(now)
         value["recorder"] = recorder
+        value["recording_history"] = self._recording_history_snapshot(now, recorder)
+        value["system_summary"] = self._system_summary_snapshot(now)
         return value
 
 

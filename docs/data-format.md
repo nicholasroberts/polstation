@@ -67,6 +67,14 @@ It is explicitly marked `diagnostic_only`; it is not an observation, is not a
 substitute for the raw files, and may be replaced by the next acquisition. The
 immutable raw buffers are never modified while producing it.
 
+`recording-summary.json` is a bounded operational index reconstructed from
+immutable completion and failure markers when the recorder starts. It retains
+totals plus at most seven days of recent event metadata. `system-summary.json`
+contains bounded boot, uptime and storage-capacity status. Both are replaceable
+dashboard inputs, not scientific records. Exposure-settling test pixels are
+discarded; their requested exposures, ROI percentiles, completion status and
+limits are retained under `manifest.json` → `exposure_control.settling`.
+
 ## Deployed paths and retrieval
 
 The commissioned Pi stores scientific bundles below:

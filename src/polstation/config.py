@@ -21,7 +21,7 @@ DEFAULT_POLARIZATION_PREVIEW = {"instrument_matrix": None}
 
 DEFAULT_OBSERVATION_CAPTURE = {
     "interval_seconds": 600,
-    "exposure_mode": "fixed",
+    "exposure_mode": "shared_auto",
     "initial_exposure_us": 15000,
     "minimum_exposure_us": 100,
     "maximum_exposure_us": 120000000,
@@ -31,6 +31,8 @@ DEFAULT_OBSERVATION_CAPTURE = {
     "maximum_step_factor": 2,
     "timeout_margin_seconds": 10,
     "maximum_capture_attempts": 3,
+    "maximum_exposure_settling_attempts": 24,
+    "maximum_exposure_settling_seconds": 480,
     "stream_bytes_per_second": None,
 }
 
@@ -118,10 +120,17 @@ def load_config(path):
         "timeout_margin_seconds",
     ):
         positive(observation_capture[name], f"observation_capture.{name}")
-    for name in ("interval_seconds", "maximum_capture_attempts"):
+    for name in (
+        "interval_seconds", "maximum_capture_attempts",
+        "maximum_exposure_settling_attempts",
+    ):
         value = observation_capture[name]
         if type(value) is not int or value <= 0:
             raise ValueError(f"observation_capture.{name} must be a positive integer")
+    positive(
+        observation_capture["maximum_exposure_settling_seconds"],
+        "observation_capture.maximum_exposure_settling_seconds",
+    )
     if not (
         observation_capture["minimum_exposure_us"]
         <= observation_capture["initial_exposure_us"]
